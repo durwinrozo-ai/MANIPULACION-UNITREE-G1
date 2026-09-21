@@ -18,5 +18,14 @@
   <worldbody>
     <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <body name="target_red" pos="2.800 0.000 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="1 0 0 1"/>
+    </body>
+    <body name="target_green" pos="0.161 2.796 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="0 1 0 1"/>
+    </body>
+    <body name="target_blue" pos="0.161 -2.796 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="0 0 1 1"/>
+    </body>
   </worldbody>
 </mujoco>
