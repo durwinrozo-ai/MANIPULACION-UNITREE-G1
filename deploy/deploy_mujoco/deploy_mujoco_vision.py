@@ -155,12 +155,12 @@ def compute_cmd_from_vision(shared_state, nav_state):
     alpha_cmd = 0.1
     nav_state["smoothed_ang_vel"] = nav_state["smoothed_ang_vel"] * (1 - alpha_cmd) + target_ang_vel * alpha_cmd
 
-    stop_y = 0.85
+    stop_y = 0.62
     if y > stop_y:
         nav_state["arrived"] = True
         return np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
-    lin_vel_x = 0.65 if abs(nav_state["smoothed_error_x"]) < 0.5 else 0.0
+    lin_vel_x = 0.85 if abs(nav_state["smoothed_error_x"]) < 0.5 else 0.0
     return np.array([lin_vel_x, 0.0, nav_state["smoothed_ang_vel"]], dtype=np.float32)
 
 
