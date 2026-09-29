@@ -1,0 +1,19 @@
+<mujoco model="g1 escena 3 colores">
+  <!-- Generado por run_sim_3colores.py: incluye la escena que ya usa SONIC
+       (ROBOT_SCENE del yaml) y le agrega las tres cajas. El G1 nace mirando a +x. -->
+  <include file="__ESCENA_ORIGINAL__"/>
+
+  <worldbody>
+    <!-- Mismos angulos y distancia (2.8 m) que el programa original de 12 GDL.
+         Sin colision (contype/conaffinity 0): son solo marcas visuales. -->
+    <body name="target_red" pos="2.800 0.000 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="1 0 0 1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="target_green" pos="0.161 2.796 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="0 1 0 1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="target_blue" pos="0.161 -2.796 0.15">
+      <geom type="box" size="0.15 0.15 0.15" rgba="0 0 1 1" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>
