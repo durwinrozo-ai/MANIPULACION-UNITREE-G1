@@ -1,5 +1,7 @@
 # Robot de las 3 cajas en MuJoCo con el G1 de 29 GDL (política SONIC), sin Pico 4
 
+*Actualizado 08/10/2026: robot real, voz con Insta360, panel de control web, red, cámara v2 y velocidad configurable.*
+
 Migración del programa `deploy_mujoco_vision.py` (unitree_rl_gym, 12 GDL) al entorno
 **GR00T-WholeBodyControl**: MuJoCo con el G1 de 29 GDL y la política SONIC (ONNX), la misma
 del runbook sim2sim. Se conserva el comportamiento: quieto → `s` gira inspeccionando →
@@ -136,7 +138,27 @@ PC2 192.168.123.164   teleimager-server --rs ── JPEG ZMQ :55555 ──▶ Te
 PC  (5062robotika)    Terminal 2: deploy.sh --input-type zmq_manager enp131s0 ◀── planner :5556 ── Terminal 3
 ```
 
-## Orden de arranque
+## Antes de empezar: red y arranque rápido (robot real)
+
+**Lista de comprobación de la red.** Si falla cualquier punto, nada de lo demás funciona (en el panel se ven como puntos rojos de PC1, PC2 e Interfaz, y `scp`/`ssh` dan `No route to host`):
+
+| # | Comprobación (en la PC) | Debe verse | Si falla |
+|---|---|---|---|
+| 1 | Robot encendido y con el cable Ethernet conectado (esperar 30–60 s tras encender) | — | Revisar cable/switch y esperar el arranque |
+| 2 | `ip -br addr show enp131s0` | `UP` y `192.168.123.222/24` | `NO-CARRIER`/`DOWN`: cable o robot apagado. Sin IP: `sudo ip addr add 192.168.123.222/24 dev enp131s0 && sudo ip link set enp131s0 up`. Nombre distinto: `ip -br link` |
+| 3 | `ping -c 3 192.168.123.161` y `ping -c 3 192.168.123.164` | respuesta | Ver puntos 1 y 2 |
+| 4 | `ip route get 192.168.123.164` | `dev enp131s0` | Si sale por el wifi (`wlp130s0f0` también tiene 192.168.123.104), corregir la ruta |
+
+**Camino corto con el panel** (reemplaza las terminales A, M, 2 y 3; el detalle manual sigue más abajo):
+
+1. En la PC: `cd ~/tres-colores && git pull`, luego `cd $GR00T && source .venv_teleop/bin/activate && python ~/tres-colores/deploy/deploy_sonic/panel_g1.py` y abrir `http://127.0.0.1:8080`.
+2. Comprobar que PC1, PC2 e Interfaz estén en verde. Guardar la contraseña del robot en el panel (solo vive en memoria; hay que repetirlo cada vez que se reinicia el panel).
+3. La primera vez (o tras actualizar): **Preparar robot (scp)**.
+4. Robot de pie, mando Unitree a mano, casilla de seguridad marcada → **Arrancar todo** → confirmar `SI`.
+5. Primero la tecla/botón `w` (prueba de marcha); después `1/2/3`.
+6. Al terminar: **Detener todo**.
+
+## Orden de arranque (manual, una terminal por proceso)
 
 **0. Cámara en el PC2** (`ssh unitree@192.168.123.164`). El servicio de Unitree `videohub_pc4` arranca con el robot
 y ocupa la RealSense (`Device or resource busy`); un supervisor lo relanza. Se crea una vez este script en el PC2:
@@ -145,6 +167,7 @@ y ocupa la RealSense (`Device or resource busy`); un supervisor lo relanza. Se c
 cat > ~/start_camera.sh <<'EOF'
 #!/bin/bash
 # Libera la RealSense de quien la tenga (videohub_pc4 u otros) y arranca teleimager
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 sudo -v || exit 1
 cd ~/teleimager
 grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"
@@ -214,7 +237,7 @@ cd $GR00T && source .venv_teleop/bin/activate
 python $REPO/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3
 ```
 Con `--real`: exige imagen (si no llega, sale sin enviar `start`), pide escribir `SI` antes de
-habilitar el planner (en la Terminal 2 debe salir `Planner enabled`), limita la velocidad (defecto 0.2 m/s, tope 0.3),
+habilitar el planner (en la Terminal 2 debe salir `Planner enabled`), limita la velocidad (defecto 0.2 m/s, tope 0.3; el tope se sube con `--max-walk`, ver «Marcha y velocidad»),
 gira a 0.3 rad/s y, si se pierde la imagen más de 1 s, deja el planner en IDLE.
 
 | Tecla | Acción |
@@ -301,8 +324,8 @@ remuestreo, selección de dispositivo). **Falta:** probar con el Insta360 real c
 ## Distancia de parada (calibrada en el robot real, 07/10/2026)
 
 `--stop-y` = **0.93** (por defecto, vale para rojo, verde y azul). `y_max` es el borde inferior del objeto en la imagen,
-así que depende de la distancia al suelo y no del color. Velocidades: avance 0.3 m/s (defecto real 0.2, tope 0.3);
-desde `y_max > 0.80` (`--slow-y`) baja a 0.15 m/s. Con la caja a ~1.5 m, `y_max` ≈ 0.14. La línea de parada queda a ~7 % del borde
+así que depende de la distancia al suelo y no del color. Velocidades: avance 0.3 m/s (defecto real 0.2, tope 0.3 salvo `--max-walk`);
+desde `y_max > 0.80` (`--slow-y`) baja a 0.15 m/s (`--slow-speed`). Con la caja a ~1.5 m, `y_max` ≈ 0.14. La línea de parada queda a ~7 % del borde
 inferior de la imagen: si el robot se pasa por inercia la caja sale del encuadre; en ese caso baja `--walk-speed` o `--slow-y`.
 Pendiente anotar la distancia real (cinta) en esa posición.
 
@@ -312,7 +335,33 @@ Pendiente anotar la distancia real (cinta) en esa posición.
 2. Tecla `w` con el robot de pie, el pie en el suelo y un operador al lado.
 3. Giro en el sitio (`s`).
 4. Caja a ~1.5 m (si está más cerca que la parada dirá `LLEGO` sin caminar).
-5. Aumentar distancia/velocidad poco a poco (máx. 0.3 m/s mientras no esté validado).
+5. Aumentar distancia/velocidad poco a poco (0.3 m/s hasta validar la marcha; luego seguir la tabla de «Marcha y velocidad»).
+
+## Marcha y velocidad
+
+**Modos de marcha que usa la aplicación** (mensajes `planner` de SONIC; el programa solo elige modo, dirección y velocidad, el equilibrio y los pasos los resuelve la política):
+
+| Modo | Código | Cuándo |
+|---|---|---|
+| IDLE (de pie, quieto) | 0 | Quieto, **girar en el sitio** al inspeccionar (`facing` rota a 0.3 rad/s), centrar la caja antes de avanzar, PARAR, sin imagen, al salir |
+| SLOW_WALK (marcha lenta) | 1 | Caminar hacia la caja y la prueba `w`. Velocidad 0.1–0.8 m/s |
+
+No están implementados otros modos del planner (caminar normal, correr, agacharse, gatear).
+Al avanzar, el rumbo se corrige con un controlador proporcional sobre el error horizontal de la caja (ganancia `--k-turn` 0.8, giro máximo `--max-turn` 0.6 rad/s).
+
+**Velocidades por defecto con el panel:** avance 0.3 m/s; acercamiento 0.15 m/s cuando `y_max > 0.80`; prueba `w` 0.3 m/s durante 3 s; giro 0.3 rad/s; parada en `y_max ≥ 0.93`.
+
+**Subir la velocidad** (el tope en `--real` es 0.3 m/s mientras no se valide; se sube con `--max-walk` hasta 0.8 o en Ajustes del panel: «Tope de velocidad real»). Hacerlo por pasos, con el mando Unitree en la mano y espacio libre; probar cada paso primero con `w` y después con la caja:
+
+| Paso | Avance y tope (m/s) | `--slow-y` | `--slow-speed` (m/s) |
+|---|---|---|---|
+| 0 (actual) | 0.3 | 0.80 | 0.15 |
+| 1 | 0.4 | 0.75 | 0.20 |
+| 2 | 0.5 | 0.70 | 0.20 |
+| 3 | 0.6 o más | 0.65 | 0.25 |
+
+A más velocidad el robot necesita más distancia para frenar (bajar `--slow-y`) y la cámara se mueve más (puede aparecer zigzag): si pasa, volver al paso anterior.
+Al subir el tope el programa avisa: `[Seguridad] tope de velocidad real elevado a X m/s`.
 
 ## Qué se verificó y qué falta
 
@@ -320,8 +369,9 @@ Verificado con un emisor ZMQ falso: lectura de JPEG en 4 formatos de mensaje (cr
 multiparte, estéreo → mitad izquierda), detección HSV de los 3 colores con 3 iluminaciones y sin falsos
 positivos cruzados, `start` solo tras `SI`, aborto sin imagen, IDLE al perder la imagen, tope de velocidad.
 Verificado en el robot real: cámara (30,7 fps), detección de los 3 colores, `Planner enabled`, el deploy procesa el `facing` del giro de inspección,
-distancia de parada.
-**Falta en el robot:** confirmar la marcha `SLOW_WALK` (nunca se ha visto caminar al robot con este programa).
+distancia de parada, micrófono Insta360 → UDP → reconocimiento (prueba aislada), panel: inicio de cámara por ssh con contraseña.
+Verificado con procesos simulados: panel completo (arranque, `y` automático, teclas, emergencia, cierre ordenado).
+**Falta en el robot:** confirmar la marcha `SLOW_WALK` (nunca se ha visto caminar al robot con este programa), llegar a la caja y medir la distancia real de parada con cinta, la voz integrada con el robot (precisión de «zuu», ruido de motores, latencia) y el panel completo con el robot real.
 
 ## Diagnóstico: "LLEGO" sin avanzar / el robot no se mueve
 
@@ -356,6 +406,18 @@ python $REPO/deploy/deploy_sonic/panel_g1.py          # abrir http://127.0.0.1:8
   «Preparar robot (scp)» copia `mic_stream_g1.py` y `start_camera.sh` al PC2; «¿Quién usa la cámara?» y «Liberar puerto 5556» resuelven los fallos habituales.
 - **Contraseña del robot** (ssh/sudo): se escribe en el panel, solo vive en memoria y se envía cuando el robot la pide. Con llave ssh no hace falta.
 - **Ajustes** (IPs, rutas, `stop-y`, velocidad, voz) se guardan en `panel_config.json` (no se sube al repo).
+
+**Problemas frecuentes del panel (robot real)**
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| PC1/PC2/Interfaz en rojo; `scp`/`ssh`: `No route to host` | La PC no tiene enlace con el robot (cable, robot apagado o arrancando, interfaz sin IP) | Lista de comprobación de la red (arriba) |
+| Registro de A/M queda en el aviso «post-quantum» sin avanzar | El robot espera la contraseña y el panel no la tiene (se pierde al reiniciar el panel) | Escribirla en «Contraseña del robot» y **Guardar en memoria**: se envía sola, una vez por pregunta |
+| `teleimager-server: command not found` | ssh no interactivo no carga `~/.bashrc`; el programa está en `~/.local/bin` | Ya corregido (el panel y `start_camera.sh` añaden `~/.local/bin` al PATH); hacer `git pull` y reiniciar el panel |
+| `Device or resource busy` / `Module uvcvideo is in use` | `videohub_pc4` u otro proceso tiene la cámara | `start_camera.sh` v2 los mata; si persiste, botón «¿Quién usa la cámara?» |
+| `Address already in use` en 5556 | Pico manager, app LSC u otra copia abierta | Botón «Liberar puerto 5556» |
+| `Lost LowState` en el deploy | Se perdió la red con el robot | Lista de comprobación de la red y reiniciar el deploy |
+| Voz no oye nada | Micrófono M apagado, transmisor del Insta360 apagado, o puerto UDP ocupado por otra prueba | Activar micrófono (robot), encender el transmisor; no usar «Probar voz» a la vez que el programa con voz |
 
 El programa de cajas expone un puente local con `--panel-port 8765` (lo usa el panel; con `--no-gui` no abre la ventana de OpenCV).
 Probado con un deploy y una cámara simulados (arranque, `y` automático, teclas, emergencia, cierre ordenado); **falta probarlo con el robot real**.
