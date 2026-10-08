@@ -123,3 +123,86 @@ Verificado sin el robot simulado real (entorno sin GPU ni mallas):
 | Rojo y azul intercambiados | Orden de canales distinto | Añadir `--swap-rb` |
 | Se cae al pulsar `9` | La banda lo sostenía con los pies en el aire | `7` ×2 antes de `9` |
 | No detecta una caja lejana | La cámara mira 44° hacia abajo: solo ve el suelo entre ~0.6 y ~3.3 m | Acercar las cajas en `escena_cajas.xml.template` (2.8 m es el límite práctico) |
+
+---
+
+# Robot real (G1 físico, cámara RealSense de la cabeza)
+
+`deploy_sonic_vision.py` tiene ahora `--source g1` (cámara real) y `--real` (modo seguro).
+**No** se usa la Terminal 1 (MuJoCo).
+
+```
+PC2 192.168.123.164   teleimager-server --rs ── JPEG ZMQ :55555 ──▶ Terminal 3 (este programa)
+PC  (5062robotika)    Terminal 2: deploy.sh --input-type zmq_manager enp131s0 ◀── planner :5556 ── Terminal 3
+```
+
+## Orden de arranque
+
+**0. Cámara en el PC2** (`ssh unitree@192.168.123.164`). `videohub_pc4` de Unitree ocupa la
+RealSense y un supervisor lo relanza, así que se arranca con el bucle de 25 s:
+
+```bash
+sudo -v
+cd ~/teleimager
+timeout 25 bash -c 'while true; do sudo pkill -9 -f /video_hub_pc4/videohub_pc4; sleep 0.3; done' &
+sleep 2
+teleimager-server --rs        # debe decir: head_camera is ready / Running...
+```
+`cam_config_server.yaml`: `head_camera` con `enable_zmq: true`, `type: realsense`,
+`image_shape: [480, 640]`, `binocular: false`, `serial_number: 347622070449`; las cámaras de muñeca con `enable_zmq: false`.
+
+Comprobación desde el PC: `cd ~/LSC-Mafe && source venv/bin/activate && python -m robot.probar_camara_g1 192.168.123.164` → `OK: ~30 fps, frame 640x480`.
+
+**1. Calibrar colores** (nada se envía al robot):
+
+```bash
+cd $GR00T && source .venv_teleop/bin/activate
+python $REPO/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --calibrar
+```
+Cuatro paneles: cámara + máscaras de rojo/verde/azul con `px`, `err` y `ymax`. Clic en la caja = HSV del píxel.
+Si una caja no se detecta, ajusta rangos con `--hsv-file` (formato en la cabecera del script).
+Para `--stop-y`: pon una caja a la distancia de parada deseada y lee su `ymax`.
+
+**2. Terminal 2 — deploy SONIC (robot real)**
+
+```bash
+cd $GR00T/gear_sonic_deploy
+source scripts/setup_env.sh
+./deploy.sh --input-type zmq_manager enp131s0
+```
+Responde `y` y espera `Init Done`. Con el mando Unitree o la tecla `O` a mano.
+
+**3. Terminal 3 — programa de las cajas**
+
+```bash
+cd $GR00T && source .venv_teleop/bin/activate
+python $REPO/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --stop-y <valor_calibrado>
+```
+Con `--real`: exige imagen (si no llega, sale sin enviar `start`), pide escribir `SI` antes de
+habilitar el planner, limita la velocidad (defecto 0.2 m/s, tope 0.3), gira a 0.3 rad/s y, si
+se pierde la imagen más de 1 s, deja el planner en IDLE. Teclas: `s`, `1/2/3`, `0`, **ESPACIO o `x` = PARAR**,
+`b` (dos veces en 3 s = reenviar start), `q`.
+
+## Escalera de pruebas
+
+1. Solo ver: `--calibrar`, comprobar las máscaras con las cajas reales.
+2. Giro en el sitio (`s`) con un operador al lado.
+3. Caja a ~1.5 m con `--walk-speed 0.2`.
+4. Aumentar distancia/velocidad poco a poco (máx. 0.3 m/s mientras no esté validado).
+
+## Qué se verificó (sin el robot) y qué falta
+
+Verificado con un emisor ZMQ falso: lectura de JPEG en 4 formatos de mensaje (crudo, con cabecera,
+multiparte, estéreo → mitad izquierda), detección HSV de los 3 colores con 3 iluminaciones y sin falsos
+positivos cruzados, `start` solo tras `SI`, aborto sin imagen, IDLE al perder la imagen, tope de velocidad.
+**Falta en el robot:** calibrar HSV y `--stop-y` con las cajas reales; confirmar que la inclinación de la
+cabeza deja ver las cajas; validar giro (`IDLE` + `facing`) y marcha `SLOW_WALK` a baja velocidad.
+
+## Diagnóstico: "LLEGO" sin avanzar / el robot no se mueve
+
+- **Mensaje `[Nav] LLEGO: y_max=X >= stop-y Y`:** el objeto ya estaba más cerca que `--stop-y`. Sube `--stop-y` o aléjalo.
+  `--stop-y` se mide con `--calibrar` (ymax con el objeto a la distancia de parada).
+- Pulsar `1/2/3` reinicia la llegada aunque el objetivo sea el mismo.
+- `--dry-run`: calcula y muestra todo pero el planner recibe siempre IDLE; el robot no se mueve.
+- Orden de diagnóstico si el robot no camina: (1) Terminal 2 debe decir `[ZMQManager] Planner enabled`; (2) el robot debe estar
+  rígido/equilibrando (control activo); (3) en la Terminal 3 la etiqueta debe ser `avanzando mode=1`.

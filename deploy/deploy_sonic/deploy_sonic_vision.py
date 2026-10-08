@@ -2,25 +2,40 @@
 """Busqueda y aproximacion a cajas de colores con el G1 de 29 GDL (politica SONIC).
 
 Equivalente de deploy_mujoco_vision.py (12 GDL / unitree_rl_gym) para el entorno
-GR00T-WholeBodyControl: MuJoCo (run_sim_3colores.py) + deploy ONNX SONIC.
+GR00T-WholeBodyControl. Funciona en dos modos:
 
-    run_sim_3colores.py ──imagen ZMQ :5555──▶ este programa ──planner ZMQ :5556──▶ deploy.sh (SONIC)
+  SIMULADOR (por defecto)
+    run_sim_3colores.py ──imagen ZMQ :5555──▶ este programa ──planner ZMQ :5556──▶ deploy.sh sim
 
-Este programa hace de "operador": recibe la camara head_camera del G1 simulado,
-detecta rojo/verde/azul y publica mensajes `planner` (modo, movimiento, facing)
-con el mismo formato que gear_sonic/scripts/pico_manager_thread_server.py.
-No usa Pico 4.
+  ROBOT REAL  (--source g1 --real)
+    teleimager-server (PC2) ──JPEG ZMQ :55555──▶ este programa ──planner :5556──▶ deploy.sh <interfaz>
+
+Este programa hace de "operador": recibe la camara, detecta rojo/verde/azul y publica
+mensajes `planner` (modo, movimiento, facing) con el mismo formato que
+gear_sonic/scripts/pico_manager_thread_server.py. No usa Pico 4.
 
 Teclas (con foco en la ventana "Lo que ve el robot"; no distingue mayusculas):
     s  girar en el sitio inspeccionando        0  quieto (cancela todo)
     1  buscar y caminar a la caja roja         2  verde        3  azul
-    b  reenviar el comando `start` a SONIC     q  salir
+    ESPACIO o x  PARAR (IDLE inmediato)        q  salir (deja al robot quieto)
+    w  prueba de marcha: camina recto 3 s sin usar la vision (aisla el problema)
+    b  reenviar el comando `start` (en --real: pulsar dos veces en 3 s)
+
+Robot real: la parada de emergencia de verdad es la tecla O en la terminal del deploy
+o el mando de Unitree; ESPACIO solo detiene el planner.
+
+Calibracion de colores (sin enviar nada al robot):
+    python deploy_sonic_vision.py --source g1 --calibrar
+  Clic en la imagen = imprime el HSV del pixel. Rangos propios con --hsv-file (JSON):
+    {"red": [[[0,130,70],[10,255,255]], [[170,130,70],[180,255,255]]],
+     "green": [[[40,80,50],[85,255,255]]], "blue": [[[95,110,50],[130,255,255]]]}
 """
 import argparse
 import base64
 import json
 import math
 import struct
+import sys
 import threading
 import time
 
@@ -37,6 +52,8 @@ MODE_SLOW_WALK = 1  # 0.1 - 0.8 m/s
 
 TARGET_STOP, TARGET_SCAN, TARGET_RED, TARGET_GREEN, TARGET_BLUE = -1, 0, 1, 2, 3
 TARGET_NAMES = {-1: "QUIETO", 0: "INSPECCIONANDO", 1: "ROJO", 2: "VERDE", 3: "AZUL"}
+
+REAL_MAX_WALK = 0.3  # m/s, tope en --real mientras no se valide el robot
 
 
 # ----------------------------------------------------------------------------
@@ -70,72 +87,119 @@ def build_planner(mode: int, movement, facing, speed: float = -1.0, height: floa
 
 
 # ----------------------------------------------------------------------------
-# Vision
+# Vision: mascaras de color
 # ----------------------------------------------------------------------------
-COLOR_RULES = {
+# Simulador: colores puros de MuJoCo (RGB)
+RGB_RULES = {
     TARGET_RED: lambda r, g, b: (r > 150) & (g < 80) & (b < 80),
     TARGET_GREEN: lambda r, g, b: (g > 150) & (r < 80) & (b < 80),
     TARGET_BLUE: lambda r, g, b: (b > 150) & (r < 80) & (g < 80),
 }
 
+# Camara real: rangos HSV de OpenCV (H 0-180, S y V 0-255). Punto de partida:
+# calibrar con --calibrar y las cajas reales, con la luz del lugar de trabajo.
+DEFAULT_HSV = {
+    TARGET_RED: [((0, 130, 70), (10, 255, 255)), ((170, 130, 70), (180, 255, 255))],
+    TARGET_GREEN: [((40, 80, 50), (85, 255, 255))],
+    TARGET_BLUE: [((95, 110, 50), (130, 255, 255))],
+}
+_NAME2T = {"red": TARGET_RED, "green": TARGET_GREEN, "blue": TARGET_BLUE}
 
-def detect_color(img_rgb, rule, min_pixels=60):
-    """Devuelve (detectado, error_x, y_min, y_max) o (False, 0, 0, 0).
+
+def load_hsv_rules(path):
+    rules = {k: list(v) for k, v in DEFAULT_HSV.items()}
+    if path:
+        with open(path) as f:
+            data = json.load(f)
+        for name, ranges in data.items():
+            rules[_NAME2T[name]] = [(tuple(lo), tuple(hi)) for lo, hi in ranges]
+    return rules
+
+
+def color_mask(img_rgb, target, mode, hsv_rules, hsv=None):
+    """Mascara booleana del color `target`. mode: 'rgb' (simulador) o 'hsv' (real)."""
+    if mode == "rgb":
+        r = img_rgb[:, :, 0].astype(np.int32)
+        g = img_rgb[:, :, 1].astype(np.int32)
+        b = img_rgb[:, :, 2].astype(np.int32)
+        return RGB_RULES[target](r, g, b)
+    if hsv is None:
+        hsv = cv2.cvtColor(np.ascontiguousarray(img_rgb), cv2.COLOR_RGB2HSV)
+    m = np.zeros(hsv.shape[:2], np.uint8)
+    for lo, hi in hsv_rules[target]:
+        m |= cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    return m > 0
+
+
+def mask_stats(mask, min_pixels, largest=False):
+    """(detectado, error_x, y_min, y_max) a partir de una mascara booleana.
 
     error_x: -1 (izquierda) .. +1 (derecha); positivo = el color esta a la derecha.
     y_max:   fila inferior del color (0 arriba .. 1 abajo). Crece al acercarse.
+    largest: usa solo el componente conexo mas grande (descarta manchas sueltas).
     """
-    r = img_rgb[:, :, 0].astype(np.int32)
-    g = img_rgb[:, :, 1].astype(np.int32)
-    b = img_rgb[:, :, 2].astype(np.int32)
-    mask = rule(r, g, b)
+    h, w = mask.shape[:2]
+    if largest and int(mask.sum()) >= min_pixels:
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+        if n > 1:
+            k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            mask = labels == k
     if int(mask.sum()) < min_pixels:
-        return False, 0.0, 0.0, 0.0
+        return (False, 0.0, 0.0, 0.0), mask
     ys, xs = np.nonzero(mask)
-    h, w = img_rgb.shape[:2]
     err = (xs.mean() - w / 2.0) / (w / 2.0)
-    return True, float(err), float(ys.min() / h), float(ys.max() / h)
+    return (True, float(err), float(ys.min() / h), float(ys.max() / h)), mask
 
 
-class ImageReceiver(threading.Thread):
-    """Se suscribe a la camara publicada por el simulador (msgpack + JPEG base64)."""
+def detect_color(img_rgb, target, mode, hsv_rules, min_pixels, hsv=None):
+    """Devuelve (det, mascara) con det = (detectado, err, y_min, y_max)."""
+    mask = color_mask(img_rgb, target, mode, hsv_rules, hsv)
+    return mask_stats(mask, min_pixels, largest=(mode == "hsv"))
 
-    def __init__(self, host, port, key, swap_rb=False):
+
+# ----------------------------------------------------------------------------
+# Vision: recepcion de imagen
+# ----------------------------------------------------------------------------
+class _Receiver(threading.Thread):
+    conflate = True
+
+    def __init__(self, host, port, swap_rb=False):
         super().__init__(daemon=True)
-        self.host, self.port, self.key, self.swap_rb = host, port, key, swap_rb
+        self.host, self.port, self.swap_rb = host, port, swap_rb
         self.lock = threading.Lock()
         self.frame = None
         self.frame_time = 0.0
         self.count = 0
         self.stop = False
-        self.keys_seen = None
+
+    def decode(self, parts):  # -> imagen RGB (uint8, HxWx3) o None
+        raise NotImplementedError
 
     def run(self):
         ctx = zmq.Context.instance()
         sock = ctx.socket(zmq.SUB)
-        sock.setsockopt(zmq.CONFLATE, 1)  # solo la imagen mas reciente
+        if self.conflate:
+            sock.setsockopt(zmq.CONFLATE, 1)  # solo la imagen mas reciente
+        else:
+            sock.setsockopt(zmq.RCVHWM, 2)
         sock.setsockopt_string(zmq.SUBSCRIBE, "")
         sock.setsockopt(zmq.RCVTIMEO, 500)
         sock.connect(f"tcp://{self.host}:{self.port}")
         while not self.stop:
             try:
-                raw = sock.recv()
+                parts = sock.recv_multipart()
             except zmq.Again:
                 continue
             try:
-                msg = msgpack.unpackb(raw, raw=False)
-                images = msg["images"]
-                self.keys_seen = list(images.keys())
-                val = images[self.key] if self.key in images else next(iter(images.values()))
-                if isinstance(val, str):
-                    val = base64.b64decode(val)
-                img = cv2.imdecode(np.frombuffer(val, np.uint8), cv2.IMREAD_COLOR)
+                img = self.decode(parts)
                 if img is None:
                     continue
                 if self.swap_rb:
-                    img = img[:, :, ::-1].copy()
+                    img = img[:, :, ::-1]
+                img = np.ascontiguousarray(img)
                 with self.lock:
-                    self.frame = img  # RGB (ver run_camera_viewer.py)
+                    self.frame = img
                     self.frame_time = time.time()
                     self.count += 1
             except Exception as e:  # noqa: BLE001
@@ -145,6 +209,55 @@ class ImageReceiver(threading.Thread):
     def latest(self):
         with self.lock:
             return self.frame, self.frame_time
+
+
+class SimReceiver(_Receiver):
+    """Camara del simulador: msgpack {'images': {clave: JPEG base64}} (la imagen ya es RGB)."""
+
+    def __init__(self, host, port, key, swap_rb=False):
+        super().__init__(host, port, swap_rb)
+        self.key = key
+
+    def decode(self, parts):
+        msg = msgpack.unpackb(parts[0], raw=False)
+        images = msg["images"]
+        val = images[self.key] if self.key in images else next(iter(images.values()))
+        if isinstance(val, str):
+            val = base64.b64decode(val)
+        return cv2.imdecode(np.frombuffer(val, np.uint8), cv2.IMREAD_COLOR)
+
+
+class G1Receiver(_Receiver):
+    """Camara del G1 real (teleimager-server, ZMQ PUB :55555, JPEG).
+
+    No depende del formato exacto: busca el marcador JPEG (FF D8) dentro del mensaje
+    (cruda, con cabecera o multiparte). Si la imagen es estereo (ancho >= 2.2x alto)
+    usa la mitad izquierda. OpenCV decodifica en BGR y aqui se pasa a RGB.
+    """
+
+    conflate = False  # CONFLATE no admite mensajes multiparte
+
+    def __init__(self, host, port, swap_rb=False):
+        super().__init__(host, port, swap_rb)
+        self._diag = True
+
+    def decode(self, parts):
+        if self._diag:
+            self._diag = False
+            desc = ", ".join(f"{len(p)} B [{p[:6].hex()}]" for p in parts)
+            print(f"[Camara] primer mensaje: {len(parts)} parte(s): {desc}")
+        for p in sorted(parts, key=len, reverse=True):
+            i = p.find(b"\xff\xd8")
+            if i < 0:
+                continue
+            img = cv2.imdecode(np.frombuffer(p[i:], np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            if w >= 2.2 * h:
+                img = img[:, : w // 2]
+            return img[:, :, ::-1]  # BGR -> RGB
+        return None
 
 
 # ----------------------------------------------------------------------------
@@ -164,8 +277,9 @@ class Navigator:
         self.last_seen = -1e9
         self.last_ymax = 0.0
 
-    def set_target(self, t):
-        if t != self.target:
+    def set_target(self, t, force=False):
+        # force=True: volver a elegir el mismo color reinicia la llegada ("LLEGO" ya no queda bloqueado)
+        if t != self.target or force:
             self.target = t
             self.reset_state()
 
@@ -230,32 +344,109 @@ class Navigator:
 
 
 # ----------------------------------------------------------------------------
-def draw_overlay(img_rgb, nav, det, label, hz):
+def draw_overlay(img_rgb, nav, det, label, hz, mask=None, real=False):
     out = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     out = cv2.resize(out, (640, 480), interpolation=cv2.INTER_NEAREST)
-    txt = f"{TARGET_NAMES[nav.target]} | {label} | theta={math.degrees(nav.theta):+.0f} deg | {hz:.0f} Hz"
+    if mask is not None and mask.any():
+        m8 = cv2.resize(mask.astype(np.uint8) * 255, (640, 480), interpolation=cv2.INTER_NEAREST)
+        cnts, _ = cv2.findContours(m8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(out, cnts, -1, (0, 255, 255), 2)
+    tag = "REAL" if real else "SIM"
+    txt = f"[{tag}] {TARGET_NAMES[nav.target]} | {label} | theta={math.degrees(nav.theta):+.0f} deg | {hz:.0f} Hz"
     cv2.putText(out, txt, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
     if det is not None and det[0]:
         cv2.putText(out, f"err={det[1]:+.2f} y_max={det[3]:.2f}", (8, 46),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+        yline = int(det[3] * 480)
+        cv2.line(out, (0, yline), (640, yline), (0, 255, 255), 1)
     return out
+
+
+def calibrate(rx, args, hsv_rules):
+    """Muestra la camara y las mascaras de rojo/verde/azul. No publica nada."""
+    win = "Calibracion (clic = HSV del pixel | p = guardar | q = salir)"
+    state = {"pt": None}
+    s = 0.6  # escala de cada panel
+
+    def on_mouse(ev, x, y, flags, param):
+        if ev == cv2.EVENT_LBUTTONDOWN:
+            state["pt"] = (int(x / s), int(y / s))
+
+    cv2.namedWindow(win)
+    cv2.setMouseCallback(win, on_mouse)
+    print("[Calibrar] esperando imagen...")
+    last = ""
+    while True:
+        frame, ft = rx.latest()
+        if frame is None:
+            cv2.imshow(win, np.zeros((480, 640, 3), np.uint8))
+            if (cv2.waitKey(50) & 0xFF) == ord("q"):
+                break
+            continue
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        size = (int(640 * s), int(480 * s))
+        base = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), size)
+        if state["pt"] is not None:
+            x, y = state["pt"]
+            if 0 <= y < frame.shape[0] and 0 <= x < frame.shape[1]:
+                h_, s_, v_ = (int(c) for c in hsv[y, x])
+                r_, g_, b_ = (int(c) for c in frame[y, x])
+                last = f"px({x},{y}) RGB=({r_},{g_},{b_}) HSV=({h_},{s_},{v_})"
+                cv2.circle(base, (int(x * s), int(y * s)), 5, (255, 255, 255), 1)
+                cv2.putText(base, f"HSV {h_},{s_},{v_}", (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        panels = [base]
+        for t in (TARGET_RED, TARGET_GREEN, TARGET_BLUE):
+            mask = color_mask(frame, t, "hsv", hsv_rules, hsv)
+            det, m2 = mask_stats(mask, args.min_pixels, largest=True)
+            pan = cv2.resize(cv2.cvtColor((m2.astype(np.uint8) * 255), cv2.COLOR_GRAY2BGR), size,
+                             interpolation=cv2.INTER_NEAREST)
+            txt = f"{TARGET_NAMES[t]} px={int(mask.sum())} " + (
+                f"err={det[1]:+.2f} ymax={det[3]:.2f}" if det[0] else "no detectado")
+            cv2.putText(pan, txt, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            panels.append(pan)
+        grid = np.vstack([np.hstack(panels[:2]), np.hstack(panels[2:])])
+        cv2.imshow(win, grid)
+        k = cv2.waitKey(30) & 0xFF
+        if k == ord("q"):
+            break
+        if k == ord("p"):
+            cv2.imwrite("calib_snapshot.png", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            print("[Calibrar] guardado calib_snapshot.png;", last)
+        if state["pt"] is not None and last:
+            print("[Calibrar]", last)
+            state["pt"] = None
+    cv2.destroyAllWindows()
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--image-host", default="127.0.0.1")
-    p.add_argument("--image-port", type=int, default=5555, help="camera_port de run_sim_3colores.py")
-    p.add_argument("--camera-key", default="ego_view")
+    p.add_argument("--source", choices=("sim", "g1"), default="sim",
+                   help="sim = simulador MuJoCo; g1 = camara del robot real (teleimager)")
+    p.add_argument("--real", action="store_true",
+                   help="robot real: pide confirmacion antes de start, limita velocidad, "
+                        f"tope {REAL_MAX_WALK} m/s, exige imagen")
+    p.add_argument("--calibrar", action="store_true", help="solo camara + mascaras de color; no publica nada")
+    p.add_argument("--image-host", default=None, help="defecto: 127.0.0.1 (sim) / 192.168.123.164 (g1)")
+    p.add_argument("--image-port", type=int, default=None, help="defecto: 5555 (sim) / 55555 (g1)")
+    p.add_argument("--camera-key", default="ego_view", help="solo sim")
     p.add_argument("--swap-rb", action="store_true", help="si rojo y azul salen intercambiados")
+    p.add_argument("--color-mode", choices=("rgb", "hsv"), default=None, help="defecto: rgb (sim) / hsv (g1)")
+    p.add_argument("--hsv-file", default=None, help="JSON con rangos HSV propios")
+    p.add_argument("--min-pixels", type=int, default=None, help="pixeles minimos del color (sim 60 / g1 150)")
     p.add_argument("--planner-port", type=int, default=5556, help="puerto ZMQ que lee deploy.sh (zmq_manager)")
     p.add_argument("--rate", type=float, default=50.0, help="Hz de publicacion del planner (>=20; el deploy descarta >100 ms)")
     p.add_argument("--no-start", action="store_true", help="no enviar el comando start al arrancar")
+    p.add_argument("--no-gui", action="store_true", help="sin ventana (pruebas); usar con --target")
+    p.add_argument("--dry-run", action="store_true",
+                   help="calcula todo pero publica siempre IDLE: el robot no se mueve")
+    p.add_argument("--target", type=int, default=TARGET_STOP, choices=(-1, 0, 1, 2, 3), help="objetivo inicial")
     # navegacion
-    p.add_argument("--scan-ang-vel", type=float, default=0.5, help="rad/s al inspeccionar")
-    p.add_argument("--walk-speed", type=float, default=0.5, help="m/s (SLOW_WALK admite 0.1-0.8)")
-    p.add_argument("--slow-speed", type=float, default=0.25, help="m/s al acercarse")
+    p.add_argument("--scan-ang-vel", type=float, default=None, help="rad/s al inspeccionar (sim 0.5 / real 0.3)")
+    p.add_argument("--walk-speed", type=float, default=None, help="m/s (SLOW_WALK 0.1-0.8; sim 0.5 / real 0.2)")
+    p.add_argument("--slow-speed", type=float, default=None, help="m/s al acercarse (sim 0.25 / real 0.15)")
     p.add_argument("--slow-y", type=float, default=0.80, help="y_max a partir del cual frena")
-    p.add_argument("--stop-y", type=float, default=0.93, help="y_max de llegada (~0.85 m de la caja)")
+    p.add_argument("--stop-y", type=float, default=None,
+                   help="y_max de llegada; 0.93 = ~0.85 m en el simulador. EN REAL hay que calibrarlo")
     p.add_argument("--arrive-ticks", type=int, default=5)
     p.add_argument("--alpha-err", type=float, default=0.05)
     p.add_argument("--k-turn", type=float, default=0.8)
@@ -264,21 +455,79 @@ def main():
     p.add_argument("--lost-hold", type=float, default=0.4, help="s siguiendo recto si se pierde el color")
     args = p.parse_args()
 
+    real = args.real
+    if real and args.source != "g1":
+        p.error("--real requiere --source g1")
+    g1 = args.source == "g1"
+    args.image_host = args.image_host or ("192.168.123.164" if g1 else "127.0.0.1")
+    args.image_port = args.image_port or (55555 if g1 else 5555)
+    args.color_mode = args.color_mode or ("hsv" if g1 else "rgb")
+    args.min_pixels = args.min_pixels or (150 if g1 else 60)
+    stop_y_given = args.stop_y is not None
+    args.stop_y = args.stop_y if stop_y_given else 0.93
+    args.scan_ang_vel = args.scan_ang_vel if args.scan_ang_vel is not None else (0.3 if real else 0.5)
+    args.walk_speed = args.walk_speed if args.walk_speed is not None else (0.2 if real else 0.5)
+    args.slow_speed = args.slow_speed if args.slow_speed is not None else (0.15 if real else 0.25)
+    if real:
+        if args.walk_speed > REAL_MAX_WALK:
+            print(f"[Seguridad] --walk-speed limitado a {REAL_MAX_WALK} m/s")
+            args.walk_speed = REAL_MAX_WALK
+        args.slow_speed = min(args.slow_speed, args.walk_speed)
+
+    hsv_rules = load_hsv_rules(args.hsv_file)
+
+    rx = G1Receiver(args.image_host, args.image_port, args.swap_rb) if g1 else \
+        SimReceiver(args.image_host, args.image_port, args.camera_key, args.swap_rb)
+    rx.start()
+    print(f"[Camara] fuente {args.source}: tcp://{args.image_host}:{args.image_port} | color: {args.color_mode}")
+
+    if args.calibrar:
+        calibrate(rx, args, hsv_rules)
+        rx.stop = True
+        return
+
     ctx = zmq.Context.instance()
     pub = ctx.socket(zmq.PUB)
     pub.bind(f"tcp://*:{args.planner_port}")
     print(f"[Planner] PUB en tcp://*:{args.planner_port} (cerrar antes el Pico manager: usa el mismo puerto)")
     time.sleep(0.5)  # dar tiempo a que el deploy se suscriba
 
-    if not args.no_start:
+    if real:
+        # 1) sin imagen no se habilita nada
+        t_wait = time.time()
+        while rx.latest()[0] is None and time.time() - t_wait < 8.0:
+            time.sleep(0.1)
+        if rx.latest()[0] is None:
+            print(f"[ERROR] No llegan imagenes de tcp://{args.image_host}:{args.image_port}. "
+                  "Arranca teleimager-server en el PC2. No se envia start.")
+            rx.stop = True
+            pub.close(0)
+            sys.exit(1)
+        if not stop_y_given:
+            print("[Nav] --stop-y = 0.93: distancia de parada calibrada en el robot real (2026-10-07, "
+                  "vale para cualquier color). Cambialo con --stop-y si necesitas otra distancia.")
+        print("\n" + "=" * 70)
+        print(" ROBOT REAL: el robot debe estar de pie, con espacio libre y un operador")
+        print(" con el mando Unitree / tecla O en la terminal del deploy.")
+        print(f" walk={args.walk_speed} m/s  slow={args.slow_speed} m/s  scan={args.scan_ang_vel} rad/s")
+        print("=" * 70)
+        ans = input('Escribe SI (mayusculas) para enviar start y habilitar el planner: ').strip()
+        if ans == "SI":
+            for _ in range(3):
+                pub.send(build_command(start=True, stop=False, planner=True))
+                time.sleep(0.2)
+            print("[Planner] comando start enviado")
+        else:
+            print("[Planner] sin start. Pulsa b dos veces en la ventana para enviarlo despues.")
+    elif not args.no_start:
         for _ in range(3):
             pub.send(build_command(start=True, stop=False, planner=True))
             time.sleep(0.2)
         print("[Planner] comando start enviado")
 
-    rx = ImageReceiver(args.image_host, args.image_port, args.camera_key, args.swap_rb)
-    rx.start()
     nav = Navigator(args)
+    if args.target != TARGET_STOP:
+        nav.set_target(args.target)
 
     print(__doc__)
     win = "Lo que ve el robot (head_camera)"
@@ -287,20 +536,25 @@ def main():
     warned_noimg = False
     t_prev = time.time()
     hz = args.rate
+    last_b = 0.0
+    prev_label = ""
+    walk_until = 0.0  # tecla w: prueba de marcha recta sin vision
+    if args.dry_run:
+        print("[DRY-RUN] el planner siempre recibe IDLE: el robot NO se mueve; se ve la logica en pantalla.")
 
     try:
         while True:
             t0 = time.time()
             frame, ft = rx.latest()
-            det = None
-            if frame is not None and nav.target in COLOR_RULES:
-                det = detect_color(frame, COLOR_RULES[nav.target])
+            det, mask = None, None
+            if frame is not None and nav.target in RGB_RULES:
+                det, mask = detect_color(frame, nav.target, args.color_mode, hsv_rules, args.min_pixels)
             if frame is None or t0 - ft > 1.0:
-                if nav.target in COLOR_RULES or nav.target == TARGET_SCAN:
+                if nav.target in RGB_RULES or nav.target == TARGET_SCAN:
                     # sin imagen no se camina: quieto por seguridad
                     if not warned_noimg:
-                        print("[Vision] sin imagen del simulador: robot quieto "
-                              "(¿run_sim_3colores.py con --enable-offscreen --enable-image-publish?)")
+                        print("[Vision] sin imagen: robot quieto "
+                              "(sim: ¿run_sim_3colores.py activo? | real: ¿teleimager-server corriendo?)")
                         warned_noimg = True
                     mode, mv, fc, sp, label = MODE_IDLE, (0, 0, 0), (math.cos(nav.theta), math.sin(nav.theta), 0), -1.0, "sin imagen"
                 else:
@@ -309,26 +563,53 @@ def main():
                 warned_noimg = False
                 mode, mv, fc, sp, label = nav.step(det, t0, dt)
 
-            pub.send(build_planner(mode, mv, fc, sp))
+            if label == "LLEGO" and prev_label != "LLEGO":
+                print(f"[Nav] LLEGO: y_max={nav.last_ymax:.2f} >= stop-y {args.stop_y:.2f}. "
+                      "Si no avanzo nada, el objeto ya estaba mas cerca que stop-y: sube --stop-y o alejalo.")
+            prev_label = label
 
-            # visor + teclado (~cada tick; waitKey(1) no bloquea)
-            if frame is not None:
-                cv2.imshow(win, draw_overlay(frame, nav, det, label, hz))
+            if t0 < walk_until:  # prueba de marcha: SLOW_WALK recto, ignora la vision
+                f0 = (math.cos(nav.theta), math.sin(nav.theta), 0.0)
+                mode, mv, fc, sp, label = MODE_SLOW_WALK, f0, f0, float(np.clip(args.walk_speed, 0.1, 0.8)), "PRUEBA-MARCHA"
+
+            if args.dry_run:  # prueba sin mover: solo IDLE, igual se ve toda la logica en pantalla
+                pub.send(build_planner(MODE_IDLE, (0, 0, 0), (math.cos(nav.theta), math.sin(nav.theta), 0), -1.0))
             else:
-                blank = np.zeros((480, 640, 3), np.uint8)
-                cv2.putText(blank, "esperando imagen del simulador...", (30, 240),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.imshow(win, blank)
-            key = cv2.waitKey(1) & 0xFF
-            k = chr(key).lower() if 0 < key < 128 else ""
+                pub.send(build_planner(mode, mv, fc, sp))
+
+            k = ""
+            if not args.no_gui:
+                if frame is not None:
+                    cv2.imshow(win, draw_overlay(frame, nav, det, label, hz, mask, real))
+                else:
+                    blank = np.zeros((480, 640, 3), np.uint8)
+                    cv2.putText(blank, "esperando imagen...", (30, 240),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    cv2.imshow(win, blank)
+                key = cv2.waitKey(1) & 0xFF
+                k = chr(key).lower() if 0 < key < 128 else ""
             if k == "s":
                 nav.set_target(TARGET_SCAN); print("[Target] inspeccionando (girando)")
             elif k == "0":
                 nav.set_target(TARGET_STOP); print("[Target] quieto")
+            elif k in (" ", "x"):
+                walk_until = 0.0
+                nav.set_target(TARGET_STOP); nav.reset_state(); print("[PARAR] planner en IDLE")
             elif k in ("1", "2", "3"):
-                nav.set_target(int(k)); print(f"[Target] {TARGET_NAMES[int(k)]}")
+                nav.set_target(int(k), force=True); print(f"[Target] {TARGET_NAMES[int(k)]} (reiniciado)")
             elif k == "b":
-                pub.send(build_command(start=True, stop=False, planner=True)); print("[Planner] start reenviado")
+                if real and t0 - last_b > 3.0:
+                    last_b = t0
+                    print("[Planner] pulsa b otra vez en 3 s para confirmar el start")
+                else:
+                    pub.send(build_command(start=True, stop=False, planner=True)); print("[Planner] start reenviado")
+                    last_b = 0.0
+            elif k == "w":
+                if args.dry_run:
+                    print("[Prueba] --dry-run activo: el robot NO se mueve. Reinicia sin --dry-run.")
+                else:
+                    walk_until = time.time() + 3.0
+                    print(f"[Prueba] SLOW_WALK recto 3 s a {args.walk_speed:.2f} m/s (ESPACIO para cortar)")
             elif k == "q":
                 break
 
@@ -342,12 +623,15 @@ def main():
             sleep = dt - (time.time() - t0)
             if sleep > 0:
                 time.sleep(sleep)
+    except KeyboardInterrupt:
+        pass
     finally:
         for _ in range(5):  # dejar al robot quieto
             pub.send(build_planner(MODE_IDLE, (0, 0, 0), (math.cos(nav.theta), math.sin(nav.theta), 0), -1.0))
             time.sleep(0.02)
         rx.stop = True
-        cv2.destroyAllWindows()
+        if not args.no_gui:
+            cv2.destroyAllWindows()
         pub.close(0)
 
 
