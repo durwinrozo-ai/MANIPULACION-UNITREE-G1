@@ -144,17 +144,32 @@ y ocupa la RealSense (`Device or resource busy`); un supervisor lo relanza. Se c
 ```bash
 cat > ~/start_camera.sh <<'EOF'
 #!/bin/bash
-# Libera la RealSense de videohub_pc4 y arranca teleimager
+# Libera la RealSense de quien la tenga (videohub_pc4 u otros) y arranca teleimager
 sudo -v || exit 1
 cd ~/teleimager
-if ! grep -q 'type: realsense' cam_config_server.yaml; then
-  echo "AVISO: cam_config_server.yaml no tiene head_camera como realsense; revisa el archivo."
-fi
-( while true; do sudo pkill -9 -x videohub_pc4; sleep 0.2; done ) 2>/dev/null &
+grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"
+
+liberar() {
+  for p in $(sudo fuser /dev/video* 2>/dev/null); do
+    n=$(ps -p $p -o comm= 2>/dev/null)
+    case "$n" in python*|teleimager*) ;; *) echo "[cam] matando $p ($n)"; sudo kill -9 $p 2>/dev/null ;; esac
+  done
+  sudo pkill -9 -x videohub_pc4 2>/dev/null
+}
+
+# esperar a que quede libre 3 chequeos seguidos
+ok=0
+for i in $(seq 1 150); do
+  liberar
+  if [ -z "$(sudo fuser /dev/video* 2>/dev/null)" ]; then ok=$((ok+1)); else ok=0; fi
+  [ $ok -ge 3 ] && break
+  sleep 0.2
+done
+
+# seguir matando al que reaparezca mientras teleimager arranca (sin matar a python/teleimager)
+( for i in $(seq 1 100); do liberar; sleep 0.2; done ) >/dev/null 2>&1 &
 LOOP=$!
-( sleep 40; kill $LOOP 2>/dev/null ) 2>/dev/null &
 trap 'kill $LOOP 2>/dev/null' EXIT
-sleep 1.5
 teleimager-server --rs
 EOF
 ```
@@ -323,7 +338,17 @@ distancia de parada.
 - En la Terminal 2, si el log es solo `mode: IDLE ... movement: [0, 0, 0]`, el deploy está sano pero nunca recibió una orden de marcha.
 - Orden si el robot no camina: (1) `Planner enabled`; (2) robot rígido/equilibrando; (3) etiqueta `avanzando mode=1` en la Terminal 3; (4) `SLOW_WALK` en la Terminal 2.
 
-## Cierre de una prueba
+## Cierre de una prueba (detener todo)
 
-1. ESPACIO (robot quieto) → 2. `q` en la Terminal 3 → 3. Ctrl+C en la Terminal 2 → 4. Ctrl+C en la Terminal A (opcional) → 5. robot sentado o en arnés.
-`fuser 5556/tcp` no debe devolver procesos antes de relanzar (si los hay: `fuser -k 5556/tcp`).
+Orden estricto: el robot debe quedar quieto antes de cortar cámara o deploy.
+
+1. **ESPACIO** en la ventana "Lo que ve el robot" (robot quieto). Emergencia real: tecla `O` en la Terminal 2 o mando Unitree (la voz no sirve para esto).
+2. **`q`** en la Terminal 3 (o Ctrl+C); cierra también la escucha de voz.
+3. **Ctrl+C** en la Terminal 2 (deploy); esperar el prompt.
+4. **Ctrl+C** en la Terminal M (emisor de audio); apagar el transmisor del Insta360.
+5. **Ctrl+C** en la Terminal A (cámara). Si queda colgada: `sudo pkill -9 -f teleimager-server`.
+6. Robot sentado o en arnés.
+
+Antes de relanzar: `fuser 5556/tcp` no debe devolver procesos (si los hay: `fuser -k 5556/tcp`) y en el robot
+`sudo fuser -v /dev/video*` debe salir vacío (si no, `sudo kill -9 PID`).
+Orden de arranque de la siguiente prueba: A, M, 2, 3.
