@@ -19,6 +19,7 @@ Teclas (con foco en la ventana "Lo que ve el robot"; no distingue mayusculas):
     1  buscar y caminar a la caja roja         2  verde        3  azul
     ESPACIO o x  PARAR (IDLE inmediato)        q  salir (deja al robot quieto)
     w  prueba de marcha: camina recto 3 s sin usar la vision (aisla el problema)
+    Voz (--voz g1|pc): "robot, busca el rojo/verde/azul", "robot, inspecciona", "robot, quieto"; "para"/"alto" = PARAR
     b  reenviar el comando `start` (en --real: pulsar dos veces en 3 s)
 
 Robot real: la parada de emergencia de verdad es la tecla O en la terminal del deploy
@@ -437,6 +438,12 @@ def main():
     p.add_argument("--rate", type=float, default=50.0, help="Hz de publicacion del planner (>=20; el deploy descarta >100 ms)")
     p.add_argument("--no-start", action="store_true", help="no enviar el comando start al arrancar")
     p.add_argument("--no-gui", action="store_true", help="sin ventana (pruebas); usar con --target")
+    p.add_argument("--voz", choices=("off", "g1", "pc"), default="off",
+                   help="ordenes por voz: g1 = microfono del robot, pc = microfono de la PC (ver voz_cajas.py)")
+    p.add_argument("--voz-ip", default=None, help="IP de la PC en 192.168.123.x (multicast del microfono del G1)")
+    p.add_argument("--voz-activacion", default="robot", help="palabra de activacion ('' = sin palabra); PARAR no la necesita")
+    p.add_argument("--voz-umbral", type=float, default=500.0, help="nivel RMS minimo para detectar voz")
+    p.add_argument("--voz-idioma", default="es-CO")
     p.add_argument("--dry-run", action="store_true",
                    help="calcula todo pero publica siempre IDLE: el robot no se mueve")
     p.add_argument("--target", type=int, default=TARGET_STOP, choices=(-1, 0, 1, 2, 3), help="objetivo inicial")
@@ -525,6 +532,18 @@ def main():
             time.sleep(0.2)
         print("[Planner] comando start enviado")
 
+    voz = None
+    if args.voz != "off":
+        try:
+            from voz_cajas import VozListener
+            voz = VozListener(args.voz, args.voz_ip, args.voz_idioma, args.voz_activacion, args.voz_umbral).start()
+            print(f"[Voz] activa ({args.voz}). Frases: 'robot, busca el rojo/verde/azul', 'robot, inspecciona', "
+                  f"'robot, quieto'; 'para'/'alto' = PARAR (sin palabra de activacion).")
+        except Exception as e:  # noqa: BLE001
+            print(f"[Voz] no disponible ({type(e).__name__}: {e}); sigo solo con teclado. "
+                  "Instala: pip install SpeechRecognition (pc: sounddevice).")
+            voz = None
+
     nav = Navigator(args)
     if args.target != TARGET_STOP:
         nav.set_target(args.target)
@@ -588,6 +607,14 @@ def main():
                     cv2.imshow(win, blank)
                 key = cv2.waitKey(1) & 0xFF
                 k = chr(key).lower() if 0 < key < 128 else ""
+            if voz is not None and not k:
+                if voz.src.error and not getattr(voz, "_err_shown", False):
+                    voz._err_shown = True
+                    print(f"[Voz] ERROR del microfono: {voz.src.error}")
+                try:
+                    k = voz.cmds.get_nowait()
+                except Exception:  # queue.Empty
+                    pass
             if k == "s":
                 nav.set_target(TARGET_SCAN); print("[Target] inspeccionando (girando)")
             elif k == "0":
@@ -630,6 +657,8 @@ def main():
             pub.send(build_planner(MODE_IDLE, (0, 0, 0), (math.cos(nav.theta), math.sin(nav.theta), 0), -1.0))
             time.sleep(0.02)
         rx.stop = True
+        if voz is not None:
+            voz.close()
         if not args.no_gui:
             cv2.destroyAllWindows()
         pub.close(0)

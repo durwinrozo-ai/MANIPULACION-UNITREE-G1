@@ -212,6 +212,46 @@ gira a 0.3 rad/s y, si se pierde la imagen más de 1 s, deja el planner en IDLE.
 | `b` | Reenvía `start` (dos veces en 3 s) |
 | `q` | Salir |
 
+## Órdenes por voz (micrófono del robot)
+
+Las teclas se pueden dar hablando. El audio llega del **micrófono del G1** (UDP multicast `239.168.123.161:5555`,
+PCM 16 kHz mono, el mismo que usa la app LSC) y se reconoce con Google (`SpeechRecognition`, **necesita internet** en la PC).
+El módulo es `voz_cajas.py` (misma carpeta que `deploy_sonic_vision.py`).
+
+**Una vez, en el entorno de la Terminal 3** (`.venv_teleop`): `pip install SpeechRecognition` (para el micrófono de la PC, además `sounddevice`).
+
+**1. Probar la voz SIN robot ni cámara** (muestra paquetes, nivel de audio y lo que entiende):
+```bash
+cd ~/tres-colores/deploy/deploy_sonic
+python voz_cajas.py --fuente g1                          # micrófono del robot
+python voz_cajas.py --fuente g1 --ip 192.168.123.222     # si no detecta la IP de la PC en el cable
+python voz_cajas.py --fuente pc                          # micrófono de la PC (para comparar)
+```
+Si dice `0 paquetes`: revisar cable/IP `192.168.123.x`, firewall UDP 5555 y usar `--ip`. Si no detecta tu voz o detecta ruido,
+ajustar `--umbral` (mira `nivel`, `ruido` y `umbral` en la línea de estado; el motor del robot también suena en el micrófono).
+
+**2. Usarla con el programa de las cajas** (se añade `--voz g1` a la Terminal 3):
+```bash
+python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3 --voz g1
+```
+
+| Di | Equivale a |
+|---|---|
+| «robot, busca el rojo» / «robot, ve al verde» / «robot, azul» | `1` / `2` / `3` |
+| «robot, inspecciona» / «robot, gira» | `s` |
+| «robot, quieto» | `0` |
+| «para» / «alto» / «detente» / «stop» | **ESPACIO (PARAR)**, sin palabra de activación |
+
+- Las órdenes de movimiento exigen la **palabra de activación** «robot» (`--voz-activacion ''` la quita). PARAR no la necesita.
+- Frases con dos colores («rojo y azul») o no reconocidas se ignoran y se imprime `[Voz] oi: "..." -> ignorado (motivo)`.
+- No hay orden de voz para `w` ni `q`: la prueba de marcha y la salida siguen siendo solo por teclado.
+- El teclado sigue funcionando a la vez; el mando Unitree y la tecla `O` siguen siendo la parada de emergencia real
+  (el reconocimiento puede fallar o tardar 1–2 s: **no confiar en la voz para detener al robot**).
+- Con `--voz pc` se usa el micrófono de la PC.
+
+**Estado:** probado sin robot (interpretación de frases, segmentación del audio, recepción multicast por loopback).
+**Falta en el robot:** comprobar que el audio del G1 llega a la PC, el nivel de ruido con los motores en marcha y la latencia real.
+
 ## Distancia de parada (calibrada en el robot real, 07/10/2026)
 
 `--stop-y` = **0.93** (por defecto, vale para rojo, verde y azul). `y_max` es el borde inferior del objeto en la imagen,
