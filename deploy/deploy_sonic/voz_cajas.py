@@ -13,7 +13,9 @@ documentacion oficial). El reconocimiento usa Google (SpeechRecognition) y neces
 
 Probar SIN robot ni camara (solo oir y mostrar lo que entiende):
     python voz_cajas.py --fuente g1            # microfono del robot
-    python voz_cajas.py --fuente pc            # microfono del PC
+    python voz_cajas.py --listar               # lista los microfonos (busca el Insta360)
+    python voz_cajas.py --fuente pc --dispositivo Insta    # microfono USB Insta360 (o el indice de --listar)
+    python voz_cajas.py --fuente pc            # microfono por defecto del PC
     python voz_cajas.py --fuente g1 --ip 192.168.123.222   # IP de la PC en el cable, si no se detecta sola
 
 Requisitos (una vez):  pip install SpeechRecognition    (pc: ademas sounddevice)
@@ -126,20 +128,86 @@ class G1MicSource(threading.Thread):
         sock.close()
 
 
-class PCMicSource:
-    """Microfono de la PC con sounddevice."""
+class Resampler:
+    """Convierte audio mono float a 16 kHz (promedio anti-alias + interpolacion lineal), por bloques."""
 
-    def __init__(self, on_audio):
+    def __init__(self, src_rate, dst_rate=RATE):
+        self.ratio = src_rate / float(dst_rate)
+        self.w = max(1, int(round(self.ratio)))
+        self.tail = np.zeros(0, dtype=np.float64)
+        self.pos = 0.0
+
+    def process(self, x):
+        if abs(self.ratio - 1.0) < 1e-9:
+            return x
+        buf = np.concatenate([self.tail, x.astype(np.float64)])
+        if self.w > 1:
+            buf = np.convolve(buf, np.ones(self.w) / self.w, mode="same")
+        n = len(buf)
+        idx = np.arange(self.pos, n - 1, self.ratio)
+        if len(idx) == 0:
+            self.tail = buf
+            return np.zeros(0)
+        out = np.interp(idx, np.arange(n), buf)
+        nxt = idx[-1] + self.ratio
+        cut = int(np.floor(nxt))
+        self.tail = buf[cut:]
+        self.pos = nxt - cut
+        return out
+
+
+def listar_dispositivos():
+    import sounddevice as sd
+    filas = []
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0:
+            filas.append((i, d["name"], d["max_input_channels"], d["default_samplerate"]))
+    return filas
+
+
+def resolver_dispositivo(dispositivo):
+    """None -> microfono por defecto; entero o texto (parte del nombre, p. ej. 'Insta') -> indice."""
+    import sounddevice as sd
+    if dispositivo in (None, ""):
+        return None
+    s = str(dispositivo)
+    if s.isdigit():
+        return int(s)
+    for i, nombre, ch, sr in listar_dispositivos():
+        if s.lower() in nombre.lower():
+            return i
+    raise OSError(f"no hay un microfono que contenga '{s}' en su nombre. Usa --listar para verlos.")
+
+
+class PCMicSource:
+    """Microfono de la PC / USB (p. ej. Insta360) con sounddevice. Convierte a mono 16 kHz."""
+
+    def __init__(self, on_audio, dispositivo=None):
         import sounddevice as sd
         self.packets = 0
         self.error = None
         self._cb = on_audio
+        dev = resolver_dispositivo(dispositivo)
+        info = sd.query_devices(dev, "input")
+        self.nombre = info["name"]
+        ch = 1 if info["max_input_channels"] < 2 else 2
+        rate = RATE
+        try:
+            sd.check_input_settings(device=dev, channels=ch, samplerate=RATE, dtype="int16")
+        except Exception:  # noqa: BLE001
+            rate = int(info["default_samplerate"])
+        self.rate = rate
+        self._rs = Resampler(rate)
 
         def cb(indata, frames, t, status):
             self.packets += 1
-            self._cb(indata[:, 0].copy())
+            x = indata.astype(np.float64).mean(axis=1) if indata.ndim > 1 else indata.astype(np.float64)
+            y = self._rs.process(x)
+            if len(y):
+                self._cb(np.clip(y, -32768, 32767).astype("<i2"))
 
-        self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype="int16", blocksize=1600, callback=cb)
+        self.stream = sd.InputStream(device=dev, samplerate=rate, channels=ch, dtype="int16",
+                                     blocksize=int(rate * 0.1), callback=cb)
 
     def start(self):
         self.stream.start()
@@ -159,7 +227,7 @@ class VozListener:
     """Segmenta el audio en frases (por energia), las reconoce y deja las teclas en self.cmds."""
 
     def __init__(self, fuente="g1", iface_ip=None, idioma="es-CO", palabra_activacion="zuu",
-                 umbral_min=500.0, verbose=True, reconocer=None):
+                 umbral_min=300.0, verbose=True, reconocer=None, dispositivo=None):
         self.cmds = queue.Queue()
         self.idioma = idioma
         self.palabra = palabra_activacion
@@ -180,7 +248,7 @@ class VozListener:
         if fuente == "g1":
             self.src = G1MicSource(self._on_audio, iface_ip)
         else:
-            self.src = PCMicSource(self._on_audio)
+            self.src = PCMicSource(self._on_audio, dispositivo)
 
     # -- audio -> frases ----------------------------------------------------------------
     def _on_audio(self, chunk):
@@ -268,13 +336,21 @@ def main():
     p.add_argument("--ip", default=None, help="IP de la PC en 192.168.123.x (multicast del G1)")
     p.add_argument("--idioma", default="es-CO")
     p.add_argument("--activacion", default="zuu", help="palabra de activacion ('' = sin palabra)")
-    p.add_argument("--umbral", type=float, default=500.0, help="nivel RMS minimo para detectar voz")
+    p.add_argument("--umbral", type=float, default=300.0, help="nivel RMS minimo para detectar voz")
+    p.add_argument("--dispositivo", default=None, help="microfono USB/PC: indice o parte del nombre (p. ej. Insta)")
+    p.add_argument("--listar", action="store_true", help="lista los microfonos disponibles y sale")
     a = p.parse_args()
-    v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral)
+    if a.listar:
+        for i, n, ch, sr in listar_dispositivos():
+            print(f"  [{i}] {n}  ({ch} canales, {sr:.0f} Hz)")
+        return 0
+    v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral, dispositivo=a.dispositivo)
     v.start()
     if a.fuente == "g1":
         print(f"[Voz] escuchando {G1_MIC_GROUP}:{G1_MIC_PORT} con la IP de la PC = {v.src.iface_ip} "
               "(si no es la del cable 192.168.123.x, usa --ip)")
+    if a.fuente == "pc":
+        print(f"[Voz] microfono: {v.src.nombre} ({v.src.rate} Hz -> 16000 Hz)")
     print(f"[Voz] fuente={a.fuente} activacion='{a.activacion}'. Habla; Ctrl+C para salir.")
     t0 = time.time()
     try:

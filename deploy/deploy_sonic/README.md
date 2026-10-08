@@ -212,27 +212,38 @@ gira a 0.3 rad/s y, si se pierde la imagen más de 1 s, deja el planner en IDLE.
 | `b` | Reenvía `start` (dos veces en 3 s) |
 | `q` | Salir |
 
-## Órdenes por voz (micrófono del robot)
+## Órdenes por voz (micrófono externo USB, p. ej. Insta360)
 
-Las teclas se pueden dar hablando. El audio llega del **micrófono del G1** (UDP multicast `239.168.123.161:5555`,
-PCM 16 kHz mono, el mismo que usa la app LSC) y se reconoce con Google (`SpeechRecognition`, **necesita internet** en la PC).
-El módulo es `voz_cajas.py` (misma carpeta que `deploy_sonic_vision.py`).
+Las teclas se pueden dar hablando. Se usa un **micrófono USB conectado a la PC** (Insta360). El micrófono del G1 no se usa:
+en las pruebas del 08/10/2026 el robot no emitía audio por el cable (ni `239.168.123.161:5555` ni otro multicast, solo DDS y video).
+El reconocimiento es el de Google (`SpeechRecognition`, **necesita internet** en la PC). Módulo: `voz_cajas.py`
+(misma carpeta que `deploy_sonic_vision.py`). La opción `--fuente g1` sigue disponible por si se resuelve el audio del robot.
 
-**Una vez, en el entorno de la Terminal 3** (`.venv_teleop`): `pip install SpeechRecognition` (para el micrófono de la PC, además `sounddevice`).
+**Una vez, en el entorno de la Terminal 3** (`.venv_teleop`; si `pip` dice *externally-managed*, usa `python -m pip` o `uv pip`):
+```bash
+sudo apt install libportaudio2
+python -m pip install sounddevice SpeechRecognition
+```
 
-**1. Probar la voz SIN robot ni cámara** (muestra paquetes, nivel de audio y lo que entiende):
+**1. Conectar el Insta360 por USB y encontrarlo:**
 ```bash
 cd ~/tres-colores/deploy/deploy_sonic
-python voz_cajas.py --fuente g1                          # micrófono del robot
-python voz_cajas.py --fuente g1 --ip 192.168.123.222     # si no detecta la IP de la PC en el cable
-python voz_cajas.py --fuente pc                          # micrófono de la PC (para comparar)
+python voz_cajas.py --listar                     # debe aparecer algo como "Insta360 ...: USB Audio"
 ```
-Si dice `0 paquetes`: revisar cable/IP `192.168.123.x`, firewall UDP 5555 y usar `--ip`. Si no detecta tu voz o detecta ruido,
-ajustar `--umbral` (mira `nivel`, `ruido` y `umbral` en la línea de estado; el motor del robot también suena en el micrófono).
+Si no aparece: revisar el modo USB de la cámara (debe ser modo webcam / micrófono USB, no almacenamiento), `arecord -l`, y que no esté
+tomado por otra aplicación. Con PipeWire/PulseAudio puede salir también como `pipewire`/`default`: elegirlo en Ajustes de sonido → Entrada.
 
-**2. Usarla con el programa de las cajas** (se añade `--voz g1` a la Terminal 3):
+**2. Probar la voz SIN robot ni cámara** (muestra el micrófono, el nivel y lo que entiende):
 ```bash
-python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3 --voz g1
+python voz_cajas.py --fuente pc --dispositivo Insta      # o el número que dio --listar
+```
+Habla: `nivel` debe subir por encima de `umbral` y salir `[Voz] oi: "..." -> comando ...`. Si detecta ruido como voz o no te detecta,
+ajustar `--umbral` (defecto 300; el ruido de fondo se mide solo y el umbral nunca baja de 3× ese ruido).
+El audio se convierte solo a mono 16 kHz (el micrófono suele trabajar a 48 kHz).
+
+**3. Usarla con el programa de las cajas** (se añade a la Terminal 3):
+```bash
+python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3 --voz pc --voz-dispositivo Insta
 ```
 
 | Di | Equivale a |
@@ -242,15 +253,16 @@ python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --r
 | «zuu, quieto» | `0` |
 | «para» / «alto» / «detente» / «stop» | **ESPACIO (PARAR)**, sin palabra de activación |
 
-- Las órdenes de movimiento exigen la **palabra de activación** «zuu» (se aceptan variantes que Google suele escribir: zu, su, zoo, suu...) (`--voz-activacion ''` la quita). PARAR no la necesita.
+- Las órdenes de movimiento exigen la **palabra de activación** «zuu» (se aceptan variantes que Google suele escribir: zu, su, zoo, suu...).
+  `--voz-activacion ''` la quita. PARAR no la necesita.
 - Frases con dos colores («rojo y azul») o no reconocidas se ignoran y se imprime `[Voz] oi: "..." -> ignorado (motivo)`.
 - No hay orden de voz para `w` ni `q`: la prueba de marcha y la salida siguen siendo solo por teclado.
-- El teclado sigue funcionando a la vez; el mando Unitree y la tecla `O` siguen siendo la parada de emergencia real
-  (el reconocimiento puede fallar o tardar 1–2 s: **no confiar en la voz para detener al robot**).
-- Con `--voz pc` se usa el micrófono de la PC.
+- El teclado sigue funcionando a la vez. **No confiar en la voz para detener al robot** (el reconocimiento puede fallar o tardar 1–2 s):
+  la parada real es la tecla `O` en la Terminal 2 o el mando Unitree.
+- Si el micrófono queda lejos del operador o el motor del robot hace ruido, acercar el micrófono a quien habla.
 
-**Estado:** probado sin robot (interpretación de frases, segmentación del audio, recepción multicast por loopback).
-**Falta en el robot:** comprobar que el audio del G1 llega a la PC, el nivel de ruido con los motores en marcha y la latencia real.
+**Estado:** probado sin hardware (interpretación de frases, segmentación del audio, remuestreo 48/44,1 kHz → 16 kHz, selección de
+dispositivo con un `sounddevice` simulado). **Falta:** probar con el Insta360 real, la precisión del reconocimiento de «zuu» y la latencia.
 
 ## Distancia de parada (calibrada en el robot real, 07/10/2026)
 

@@ -442,7 +442,8 @@ def main():
                    help="ordenes por voz: g1 = microfono del robot, pc = microfono de la PC (ver voz_cajas.py)")
     p.add_argument("--voz-ip", default=None, help="IP de la PC en 192.168.123.x (multicast del microfono del G1)")
     p.add_argument("--voz-activacion", default="zuu", help="palabra de activacion ('' = sin palabra); PARAR no la necesita")
-    p.add_argument("--voz-umbral", type=float, default=500.0, help="nivel RMS minimo para detectar voz")
+    p.add_argument("--voz-umbral", type=float, default=300.0, help="nivel RMS minimo para detectar voz")
+    p.add_argument("--voz-dispositivo", default=None, help="con --voz pc: microfono USB (indice o parte del nombre, p. ej. Insta)")
     p.add_argument("--voz-idioma", default="es-CO")
     p.add_argument("--dry-run", action="store_true",
                    help="calcula todo pero publica siempre IDLE: el robot no se mueve")
@@ -536,7 +537,8 @@ def main():
     if args.voz != "off":
         try:
             from voz_cajas import VozListener
-            voz = VozListener(args.voz, args.voz_ip, args.voz_idioma, args.voz_activacion, args.voz_umbral).start()
+            voz = VozListener(args.voz, args.voz_ip, args.voz_idioma, args.voz_activacion, args.voz_umbral,
+                               dispositivo=args.voz_dispositivo).start()
             print(f"[Voz] activa ({args.voz}). Frases: 'zuu, busca el rojo/verde/azul', 'zuu, inspecciona', "
                   f"'zuu, quieto'; 'para'/'alto' = PARAR (sin palabra de activacion).")
         except Exception as e:  # noqa: BLE001
