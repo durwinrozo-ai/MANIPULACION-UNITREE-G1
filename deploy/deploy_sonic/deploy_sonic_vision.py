@@ -33,8 +33,10 @@ Calibracion de colores (sin enviar nada al robot):
 """
 import argparse
 import base64
+import http.server
 import json
 import math
+import queue
 import struct
 import sys
 import threading
@@ -363,6 +365,94 @@ def draw_overlay(img_rgb, nav, det, label, hz, mask=None, real=False):
     return out
 
 
+class PanelBridge:
+    """Servidor HTTP local (solo 127.0.0.1) para el panel web panel_g1.py:
+    GET /video.mjpg (lo que ve el robot), GET /status, POST /key?k=, POST /voz?on=0|1."""
+
+    def __init__(self, port):
+        self.port = port
+        self.keys = queue.Queue()
+        self.voz_enabled = True
+        self.status = {}
+        self._jpg = None
+        self._seq = 0
+        self._cv = threading.Condition()
+        self._t_push = 0.0
+
+    def push(self, bgr, min_dt=0.066):
+        now = time.time()
+        if now - self._t_push < min_dt:
+            return
+        self._t_push = now
+        ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 72])
+        if ok:
+            with self._cv:
+                self._jpg = buf.tobytes()
+                self._seq += 1
+                self._cv.notify_all()
+
+    def start(self):
+        bridge = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):  # silencio
+                pass
+
+            def _json(self, obj, code=200):
+                body = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path.startswith("/status"):
+                    return self._json(bridge.status)
+                if self.path.startswith("/video.mjpg"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    last = -1
+                    try:
+                        while True:
+                            with bridge._cv:
+                                bridge._cv.wait_for(lambda: bridge._seq != last, timeout=2.0)
+                                jpg, last = bridge._jpg, bridge._seq
+                            if jpg is None:
+                                continue
+                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpg))
+                            self.wfile.write(jpg + b"\r\n")
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        return
+                self._json({"error": "no existe"}, 404)
+
+            def do_POST(self):
+                from urllib.parse import parse_qs, urlparse
+                u = urlparse(self.path)
+                q = parse_qs(u.query)
+                if u.path == "/key":
+                    k = q.get("k", [""])[0]
+                    if k == "space":
+                        k = " "
+                    if len(k) == 1:
+                        bridge.keys.put(k.lower())
+                        return self._json({"ok": True, "k": k})
+                    return self._json({"ok": False}, 400)
+                if u.path == "/voz":
+                    bridge.voz_enabled = q.get("on", ["1"])[0] == "1"
+                    return self._json({"ok": True, "voz_enabled": bridge.voz_enabled})
+                self._json({"error": "no existe"}, 404)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", self.port), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        print(f"[Panel] puente HTTP en http://127.0.0.1:{self.port} (video.mjpg, status, key, voz)")
+        return self
+
+
 def calibrate(rx, args, hsv_rules):
     """Muestra la camara y las mascaras de rojo/verde/azul. No publica nada."""
     win = "Calibracion (clic = HSV del pixel | p = guardar | q = salir)"
@@ -437,6 +527,8 @@ def main():
     p.add_argument("--planner-port", type=int, default=5556, help="puerto ZMQ que lee deploy.sh (zmq_manager)")
     p.add_argument("--rate", type=float, default=50.0, help="Hz de publicacion del planner (>=20; el deploy descarta >100 ms)")
     p.add_argument("--no-start", action="store_true", help="no enviar el comando start al arrancar")
+    p.add_argument("--panel-port", type=int, default=0,
+                   help="puerto HTTP local para el panel web panel_g1.py (0 = apagado); con --no-gui no abre la ventana de OpenCV")
     p.add_argument("--no-gui", action="store_true", help="sin ventana (pruebas); usar con --target")
     p.add_argument("--voz", choices=("off", "g1", "pc", "udp"), default="off",
                    help="ordenes por voz: udp = microfono USB del robot via mic_stream_g1.py, pc = micro de la PC, g1 = multicast del G1 (ver voz_cajas.py)")
@@ -534,6 +626,8 @@ def main():
             time.sleep(0.2)
         print("[Planner] comando start enviado")
 
+    bridge = PanelBridge(args.panel_port).start() if args.panel_port else None
+
     voz = None
     if args.voz != "off":
         try:
@@ -600,24 +694,47 @@ def main():
                 pub.send(build_planner(mode, mv, fc, sp))
 
             k = ""
+            if frame is not None:
+                view = draw_overlay(frame, nav, det, label, hz, mask, real)
+            else:
+                view = np.zeros((480, 640, 3), np.uint8)
+                cv2.putText(view, "esperando imagen...", (30, 240),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             if not args.no_gui:
-                if frame is not None:
-                    cv2.imshow(win, draw_overlay(frame, nav, det, label, hz, mask, real))
-                else:
-                    blank = np.zeros((480, 640, 3), np.uint8)
-                    cv2.putText(blank, "esperando imagen...", (30, 240),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                    cv2.imshow(win, blank)
+                cv2.imshow(win, view)
                 key = cv2.waitKey(1) & 0xFF
                 k = chr(key).lower() if 0 < key < 128 else ""
+            if bridge is not None:
+                bridge.push(view)
+                if not k:
+                    try:
+                        k = bridge.keys.get_nowait()
+                    except queue.Empty:
+                        pass
             if voz is not None and not k:
                 if voz.src.error and not getattr(voz, "_err_shown", False):
                     voz._err_shown = True
                     print(f"[Voz] ERROR del microfono: {voz.src.error}")
                 try:
-                    k = voz.cmds.get_nowait()
+                    kv = voz.cmds.get_nowait()
+                    if bridge is None or bridge.voz_enabled:
+                        k = kv
+                    else:
+                        print(f"[Voz] desactivada en el panel: se ignora la orden '{kv}'")
                 except Exception:  # queue.Empty
                     pass
+            if bridge is not None:
+                bridge.status = {
+                    "target": TARGET_NAMES[nav.target], "target_id": nav.target, "label": label,
+                    "mode": int(mode), "speed": round(float(sp), 2), "hz": round(hz, 1),
+                    "theta_deg": round(math.degrees(nav.theta), 1),
+                    "y_max": None if det is None or not det[0] else round(float(det[3]), 3),
+                    "err": None if det is None or not det[0] else round(float(det[1]), 3),
+                    "stop_y": args.stop_y, "walk_speed": args.walk_speed, "real": bool(real),
+                    "dry_run": bool(args.dry_run), "walking_test": bool(t0 < walk_until),
+                    "voz": args.voz, "voz_enabled": bridge.voz_enabled,
+                    "voz_activa": voz is not None, "frame_age": None if frame is None else round(t0 - ft, 2),
+                    "t": round(t0, 2)}
             if k == "s":
                 nav.set_target(TARGET_SCAN); print("[Target] inspeccionando (girando)")
             elif k == "0":

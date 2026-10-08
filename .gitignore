@@ -160,3 +160,5 @@ cython_debug/
 
 # logs
 logs
+deploy/deploy_sonic/panel_config.json
+__pycache__/

@@ -338,6 +338,28 @@ distancia de parada.
 - En la Terminal 2, si el log es solo `mode: IDLE ... movement: [0, 0, 0]`, el deploy está sano pero nunca recibió una orden de marcha.
 - Orden si el robot no camina: (1) `Planner enabled`; (2) robot rígido/equilibrando; (3) etiqueta `avanzando mode=1` en la Terminal 3; (4) `SLOW_WALK` en la Terminal 2.
 
+## Panel de control web (`panel_g1.py`)
+
+Reemplaza abrir 5 terminales a mano. Corre en tu PC y se abre en el navegador (solo `127.0.0.1`):
+
+```bash
+cd $GR00T && source .venv_teleop/bin/activate
+python $REPO/deploy/deploy_sonic/panel_g1.py          # abrir http://127.0.0.1:8080
+```
+
+- **Arriba:** modo *Robot real* / *Simulador MuJoCo*, luces de estado (ping a PC1/PC2, interfaz, cámara, micrófono, deploy, programa de cajas, voz),
+  **Arrancar todo** (A → M → 2 → 3 con espera de cada `listo`), **Detener todo** (el orden de cierre del runbook) y **EMERGENCIA** (ESPACIO + tecla `O` al deploy).
+- **Lo que ve el robot:** video del programa de cajas con su estado (objetivo, `y_max`, velocidad, Hz). «Ver cámara» muestra la cámara sin procesar aunque el programa esté apagado.
+- **Control:** botones de `s`, `1/2/3`, `0`, `w`, `b` y PARAR (también funcionan las teclas con el foco en la página). En modo real los de movimiento exigen marcar la casilla de seguridad.
+- **Voz y micrófono:** activa el emisor del Insta360 en el robot, interruptor «Aceptar órdenes de voz» (sin reiniciar), prueba de voz y las últimas frases oídas.
+- **Conexiones:** Iniciar/Detener/Ver registro de cada terminal; responde `y` al deploy solo; el `SI` del modo real **siempre lo confirmas tú** con un botón.
+  «Preparar robot (scp)» copia `mic_stream_g1.py` y `start_camera.sh` al PC2; «¿Quién usa la cámara?» y «Liberar puerto 5556» resuelven los fallos habituales.
+- **Contraseña del robot** (ssh/sudo): se escribe en el panel, solo vive en memoria y se envía cuando el robot la pide. Con llave ssh no hace falta.
+- **Ajustes** (IPs, rutas, `stop-y`, velocidad, voz) se guardan en `panel_config.json` (no se sube al repo).
+
+El programa de cajas expone un puente local con `--panel-port 8765` (lo usa el panel; con `--no-gui` no abre la ventana de OpenCV).
+Probado con un deploy y una cámara simulados (arranque, `y` automático, teclas, emergencia, cierre ordenado); **falta probarlo con el robot real**.
+
 ## Cierre de una prueba (detener todo)
 
 Orden estricto: el robot debe quedar quieto antes de cortar cámara o deploy.
