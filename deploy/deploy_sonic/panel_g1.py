@@ -85,6 +85,8 @@ class Proc:
         self.auto = []  # [(regex, texto_a_enviar, una_vez)]
         self._tail = ""
         self._last_pw = 0.0
+        self._pw_sent = None
+        self._pw_warn = None
         self.flags = {}
         self.lock = threading.Lock()
 
@@ -132,8 +134,11 @@ class Proc:
                         self._on_line(ln)
                     if buf:
                         self._on_partial(buf)
-                elif self.p.poll() is not None:
-                    break
+                else:
+                    if buf:
+                        self._on_partial(buf)  # prompt pendiente (p. ej. contrasena guardada despues)
+                    if self.p.poll() is not None:
+                        break
             except OSError:
                 break
         if buf.strip():
@@ -153,10 +158,15 @@ class Proc:
         for a in self.auto:
             if a[0].search(buf) and not a[3]:
                 self._send_auto(a, buf)
-        if re.search(r"password.*:\s*$", buf, re.I) and PASSWORD["v"] and time.time() - self._last_pw > 2:
-            self._last_pw = time.time()
-            self.send(PASSWORD["v"])
-            self._log("[panel] contrasena enviada")
+        if re.search(r"password.*:\s*$", buf, re.I):
+            if PASSWORD["v"]:
+                if self._pw_sent != buf:  # una vez por cada pregunta (evita bloqueos si la clave es incorrecta)
+                    self._pw_sent = buf
+                    self.send(PASSWORD["v"])
+                    self._log("[panel] contrasena enviada")
+            elif self._pw_warn != buf:
+                self._pw_warn = buf
+                self._log("[panel] EL ROBOT PIDE CONTRASENA: escribela en 'Contrasena del robot' y pulsa Guardar (se envia sola)")
         if re.search(r"Escribe SI", buf):
             self.flags["espera_si"] = True
 
