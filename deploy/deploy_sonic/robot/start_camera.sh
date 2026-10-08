@@ -1,5 +1,6 @@
 #!/bin/bash
 # Libera la RealSense de quien la tenga (videohub_pc4 u otros) y arranca teleimager
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 sudo -v || exit 1
 cd ~/teleimager
 grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"

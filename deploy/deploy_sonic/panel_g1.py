@@ -230,6 +230,8 @@ def sh_q(s):
 
 def ssh_cmd(remote):
     c = CFG
+    # ssh no interactivo no carga ~/.bashrc: teleimager-server vive en ~/.local/bin
+    remote = 'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; ' + remote
     return (f"ssh -tt -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "
             f"{c['robot_user']}@{c['robot_pc2']} {sh_q(remote)}")
 
