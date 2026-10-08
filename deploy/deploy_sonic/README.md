@@ -212,39 +212,58 @@ gira a 0.3 rad/s y, si se pierde la imagen más de 1 s, deja el planner en IDLE.
 | `b` | Reenvía `start` (dos veces en 3 s) |
 | `q` | Salir |
 
-## Órdenes por voz (micrófono externo USB, p. ej. Insta360)
+## Órdenes por voz (micrófono USB Insta360 conectado al robot)
 
-Las teclas se pueden dar hablando. Se usa un **micrófono USB conectado a la PC** (Insta360). El micrófono del G1 no se usa:
-en las pruebas del 08/10/2026 el robot no emitía audio por el cable (ni `239.168.123.161:5555` ni otro multicast, solo DDS y video).
-El reconocimiento es el de Google (`SpeechRecognition`, **necesita internet** en la PC). Módulo: `voz_cajas.py`
-(misma carpeta que `deploy_sonic_vision.py`). La opción `--fuente g1` sigue disponible por si se resuelve el audio del robot.
+Las teclas se pueden dar hablando. El Insta360 está conectado por USB-C **al robot**, así que lo ve el computador interno del robot
+(probablemente el PC2, `192.168.123.164`), no la PC. `mic_stream_g1.py` corre en el robot, captura el micrófono con `arecord` y lo
+envía por UDP a la PC (PCM 16 kHz mono); `voz_cajas.py --fuente udp` lo recibe, lo segmenta en frases y lo reconoce con Google
+(`SpeechRecognition`, **necesita internet** en la PC).
 
-**Una vez, en el entorno de la Terminal 3** (`.venv_teleop`; si `pip` dice *externally-managed*, usa `python -m pip` o `uv pip`):
-```bash
-sudo apt install libportaudio2
-python -m pip install sounddevice SpeechRecognition
+```
+Insta360 ─USB-C─▶ robot (PC2): mic_stream_g1.py ──UDP :5600, PCM 16 kHz──▶ PC: voz_cajas.py --fuente udp ─▶ teclas de deploy_sonic_vision.py
 ```
 
-**1. Conectar el Insta360 por USB y encontrarlo:**
+El audio del G1 por multicast (`239.168.123.161:5555`) no se usa: el 08/10/2026 el robot no emitía nada por ese puerto
+(solo DDS `239.255.0.1:7401` y video `230.1.1.1:1720`). `--fuente g1` queda por si se resuelve.
+
+**Una vez, en la PC** (entorno `.venv_teleop`; no trae `pip`, se usa `uv`):
+```bash
+uv pip install --python "$(which python)" SpeechRecognition
+```
+(Si se usa un micrófono USB en la PC en lugar del del robot: `sudo apt install libportaudio2` y `uv pip install --python "$(which python)" sounddevice`.)
+
+**Una vez, en el robot** (PC2): copiar el script y comprobar que ve el micrófono:
+```bash
+scp ~/tres-colores/deploy/deploy_sonic/mic_stream_g1.py unitree@192.168.123.164:~/     # desde la PC
+ssh unitree@192.168.123.164
+lsusb | grep -i -E "insta|arashi|2e1a"          # debe aparecer el Insta360
+arecord -l                                       # debe aparecer como tarjeta de captura (USB Audio)
+# si falta arecord: sudo apt install alsa-utils
+python3 mic_stream_g1.py --lista
+```
+Si el Insta360 no aparece en `lsusb`/`arecord -l`: cambiar el modo USB de la cámara (webcam/micrófono, no almacenamiento) y revisar el cable.
+Si está conectado a otro de los computadores del robot, probar `ssh unitree@192.168.123.161` (PC1) con los mismos comandos.
+
+**1. Probar la voz SIN el programa de las cajas.**
+
+En la PC (Terminal V1), primero el receptor:
 ```bash
 cd ~/tres-colores/deploy/deploy_sonic
-python voz_cajas.py --listar                     # debe aparecer algo como "Insta360 ...: USB Audio"
+python voz_cajas.py --fuente udp
 ```
-Si no aparece: revisar el modo USB de la cámara (debe ser modo webcam / micrófono USB, no almacenamiento), `arecord -l`, y que no esté
-tomado por otra aplicación. Con PipeWire/PulseAudio puede salir también como `pipewire`/`default`: elegirlo en Ajustes de sonido → Entrada.
-
-**2. Probar la voz SIN robot ni cámara** (muestra el micrófono, el nivel y lo que entiende):
+En el robot (Terminal V2), después el emisor (IP de la PC en el cable, `192.168.123.222`):
 ```bash
-python voz_cajas.py --fuente pc --dispositivo Insta      # o el número que dio --listar
+python3 mic_stream_g1.py --nombre Insta --destino 192.168.123.222        # o --tarjeta N con el número de arecord -l
 ```
-Habla: `nivel` debe subir por encima de `umbral` y salir `[Voz] oi: "..." -> comando ...`. Si detecta ruido como voz o no te detecta,
-ajustar `--umbral` (defecto 300; el ruido de fondo se mide solo y el umbral nunca baja de 3× ese ruido).
-El audio se convierte solo a mono 16 kHz (el micrófono suele trabajar a 48 kHz).
+Habla cerca del micrófono: en la PC `paquetes` debe subir, `nivel` superar `umbral` y salir `[Voz] oi: "..." -> comando ...`.
+Si `paquetes=0`: firewall UDP 5600 de la PC (`sudo ufw status`) o IP de destino equivocada. Si el nivel es muy bajo o detecta ruido, ajustar `--umbral`
+(defecto 300; el ruido de fondo se mide solo y el umbral nunca baja de 3× ese ruido).
 
-**3. Usarla con el programa de las cajas** (se añade a la Terminal 3):
+**2. Usarla con el programa de las cajas** (emisor corriendo en el robot; en la Terminal 3 se añade `--voz udp`):
 ```bash
-python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3 --voz pc --voz-dispositivo Insta
+python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --real --hsv-file ~/tres-colores/hsv_real.json --walk-speed 0.3 --voz udp
 ```
+(El emisor en el robot es otra terminal más; hay que dejarla abierta. Con `--voz pc --voz-dispositivo Insta` se usaría un micrófono USB de la PC; `--voz-puerto` cambia el 5600.)
 
 | Di | Equivale a |
 |---|---|
@@ -259,10 +278,10 @@ python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --r
 - No hay orden de voz para `w` ni `q`: la prueba de marcha y la salida siguen siendo solo por teclado.
 - El teclado sigue funcionando a la vez. **No confiar en la voz para detener al robot** (el reconocimiento puede fallar o tardar 1–2 s):
   la parada real es la tecla `O` en la Terminal 2 o el mando Unitree.
-- Si el micrófono queda lejos del operador o el motor del robot hace ruido, acercar el micrófono a quien habla.
+- El micrófono está en el robot: el ruido de sus motores entra en el audio y la voz llega más baja a distancia. Hablar cerca del robot.
 
-**Estado:** probado sin hardware (interpretación de frases, segmentación del audio, remuestreo 48/44,1 kHz → 16 kHz, selección de
-dispositivo con un `sounddevice` simulado). **Falta:** probar con el Insta360 real, la precisión del reconocimiento de «zuu» y la latencia.
+**Estado:** probado sin hardware (interpretación de frases, segmentación del audio, emisor + receptor UDP de extremo a extremo con un `arecord` simulado,
+remuestreo, selección de dispositivo). **Falta:** probar con el Insta360 real conectado al robot, la precisión del reconocimiento de «zuu», el ruido de los motores y la latencia.
 
 ## Distancia de parada (calibrada en el robot real, 07/10/2026)
 

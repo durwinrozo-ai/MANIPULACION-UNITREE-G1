@@ -438,8 +438,9 @@ def main():
     p.add_argument("--rate", type=float, default=50.0, help="Hz de publicacion del planner (>=20; el deploy descarta >100 ms)")
     p.add_argument("--no-start", action="store_true", help="no enviar el comando start al arrancar")
     p.add_argument("--no-gui", action="store_true", help="sin ventana (pruebas); usar con --target")
-    p.add_argument("--voz", choices=("off", "g1", "pc"), default="off",
-                   help="ordenes por voz: g1 = microfono del robot, pc = microfono de la PC (ver voz_cajas.py)")
+    p.add_argument("--voz", choices=("off", "g1", "pc", "udp"), default="off",
+                   help="ordenes por voz: udp = microfono USB del robot via mic_stream_g1.py, pc = micro de la PC, g1 = multicast del G1 (ver voz_cajas.py)")
+    p.add_argument("--voz-puerto", type=int, default=5600, help="puerto UDP para --voz udp")
     p.add_argument("--voz-ip", default=None, help="IP de la PC en 192.168.123.x (multicast del microfono del G1)")
     p.add_argument("--voz-activacion", default="zuu", help="palabra de activacion ('' = sin palabra); PARAR no la necesita")
     p.add_argument("--voz-umbral", type=float, default=300.0, help="nivel RMS minimo para detectar voz")
@@ -538,7 +539,7 @@ def main():
         try:
             from voz_cajas import VozListener
             voz = VozListener(args.voz, args.voz_ip, args.voz_idioma, args.voz_activacion, args.voz_umbral,
-                               dispositivo=args.voz_dispositivo).start()
+                               dispositivo=args.voz_dispositivo, puerto_udp=args.voz_puerto).start()
             print(f"[Voz] activa ({args.voz}). Frases: 'zuu, busca el rojo/verde/azul', 'zuu, inspecciona', "
                   f"'zuu, quieto'; 'para'/'alto' = PARAR (sin palabra de activacion).")
         except Exception as e:  # noqa: BLE001

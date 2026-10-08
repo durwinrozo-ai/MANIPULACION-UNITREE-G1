@@ -13,6 +13,7 @@ documentacion oficial). El reconocimiento usa Google (SpeechRecognition) y neces
 
 Probar SIN robot ni camara (solo oir y mostrar lo que entiende):
     python voz_cajas.py --fuente g1            # microfono del robot
+    python voz_cajas.py --fuente udp           # audio del microfono USB del robot, enviado por mic_stream_g1.py
     python voz_cajas.py --listar               # lista los microfonos (busca el Insta360)
     python voz_cajas.py --fuente pc --dispositivo Insta    # microfono USB Insta360 (o el indice de --listar)
     python voz_cajas.py --fuente pc            # microfono por defecto del PC
@@ -107,6 +108,43 @@ class G1MicSource(threading.Thread):
             sock.bind(("", G1_MIC_PORT))
             mreq = socket.inet_aton(G1_MIC_GROUP) + socket.inet_aton(self.iface_ip)
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.settimeout(0.5)
+        except OSError as e:
+            self.error = str(e)
+            return
+        rest = b""
+        while not self.stop:
+            try:
+                data, _ = sock.recvfrom(65535)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            self.packets += 1
+            data = rest + data
+            n = len(data) - (len(data) % 2)
+            rest = data[n:]
+            if n:
+                self.on_audio(np.frombuffer(data[:n], dtype="<i2"))
+        sock.close()
+
+
+class UdpMicSource(threading.Thread):
+    """Recibe PCM 16 kHz mono 16 bit por UDP (lo envia mic_stream_g1.py desde el robot)."""
+
+    def __init__(self, on_audio, puerto=5600):
+        super().__init__(daemon=True)
+        self.on_audio = on_audio
+        self.puerto = puerto
+        self.packets = 0
+        self.stop = False
+        self.error = None
+
+    def run(self):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("", self.puerto))
             sock.settimeout(0.5)
         except OSError as e:
             self.error = str(e)
@@ -227,7 +265,7 @@ class VozListener:
     """Segmenta el audio en frases (por energia), las reconoce y deja las teclas en self.cmds."""
 
     def __init__(self, fuente="g1", iface_ip=None, idioma="es-CO", palabra_activacion="zuu",
-                 umbral_min=300.0, verbose=True, reconocer=None, dispositivo=None):
+                 umbral_min=300.0, verbose=True, reconocer=None, dispositivo=None, puerto_udp=5600):
         self.cmds = queue.Queue()
         self.idioma = idioma
         self.palabra = palabra_activacion
@@ -247,6 +285,8 @@ class VozListener:
         self._sr = None
         if fuente == "g1":
             self.src = G1MicSource(self._on_audio, iface_ip)
+        elif fuente == "udp":
+            self.src = UdpMicSource(self._on_audio, puerto_udp)
         else:
             self.src = PCMicSource(self._on_audio, dispositivo)
 
@@ -332,7 +372,9 @@ class VozListener:
 
 def main():
     p = argparse.ArgumentParser(description="Prueba de voz (sin robot ni camara)")
-    p.add_argument("--fuente", choices=("g1", "pc"), default="g1")
+    p.add_argument("--fuente", choices=("g1", "pc", "udp"), default="g1",
+                   help="g1 = multicast del robot (no emite en nuestro G1), pc = micro USB de la PC, udp = audio enviado por mic_stream_g1.py")
+    p.add_argument("--puerto", type=int, default=5600, help="puerto UDP para --fuente udp")
     p.add_argument("--ip", default=None, help="IP de la PC en 192.168.123.x (multicast del G1)")
     p.add_argument("--idioma", default="es-CO")
     p.add_argument("--activacion", default="zuu", help="palabra de activacion ('' = sin palabra)")
@@ -344,11 +386,13 @@ def main():
         for i, n, ch, sr in listar_dispositivos():
             print(f"  [{i}] {n}  ({ch} canales, {sr:.0f} Hz)")
         return 0
-    v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral, dispositivo=a.dispositivo)
+    v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral, dispositivo=a.dispositivo, puerto_udp=a.puerto)
     v.start()
     if a.fuente == "g1":
         print(f"[Voz] escuchando {G1_MIC_GROUP}:{G1_MIC_PORT} con la IP de la PC = {v.src.iface_ip} "
               "(si no es la del cable 192.168.123.x, usa --ip)")
+    if a.fuente == "udp":
+        print(f"[Voz] escuchando audio UDP en el puerto {a.puerto} (arranca mic_stream_g1.py en el robot)")
     if a.fuente == "pc":
         print(f"[Voz] microfono: {v.src.nombre} ({v.src.rate} Hz -> 16000 Hz)")
     print(f"[Voz] fuente={a.fuente} activacion='{a.activacion}'. Habla; Ctrl+C para salir.")
@@ -360,9 +404,8 @@ def main():
                 print(f"[Voz] ERROR: {v.src.error}")
                 break
             print("[Voz]", v.estado())
-            if a.fuente == "g1" and time.time() - t0 > 4 and v.src.packets == 0:
-                print("[Voz] AVISO: 0 paquetes del microfono del G1. Revisa cable/IP 192.168.123.x, "
-                      "firewall UDP 5555 y usa --ip con la IP de la PC en el cable.")
+            if a.fuente in ("g1", "udp") and time.time() - t0 > 4 and v.src.packets == 0:
+                print("[Voz] AVISO: 0 paquetes de audio. " + ("En el robot: python3 mic_stream_g1.py --nombre Insta --destino IP_DE_LA_PC; revisa firewall UDP." if a.fuente == "udp" else "Revisa cable/IP 192.168.123.x, firewall UDP 5555 y usa --ip."))
             while not v.cmds.empty():
                 v.cmds.get()
     except KeyboardInterrupt:
