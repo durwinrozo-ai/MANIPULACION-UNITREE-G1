@@ -237,12 +237,12 @@ python ~/tres-colores/deploy/deploy_sonic/deploy_sonic_vision.py --source g1 --r
 
 | Di | Equivale a |
 |---|---|
-| «robot, busca el rojo» / «robot, ve al verde» / «robot, azul» | `1` / `2` / `3` |
-| «robot, inspecciona» / «robot, gira» | `s` |
-| «robot, quieto» | `0` |
+| «zuu, busca el rojo» / «zuu, ve al verde» / «zuu, azul» | `1` / `2` / `3` |
+| «zuu, inspecciona» / «zuu, gira» | `s` |
+| «zuu, quieto» | `0` |
 | «para» / «alto» / «detente» / «stop» | **ESPACIO (PARAR)**, sin palabra de activación |
 
-- Las órdenes de movimiento exigen la **palabra de activación** «robot» (`--voz-activacion ''` la quita). PARAR no la necesita.
+- Las órdenes de movimiento exigen la **palabra de activación** «zuu» (se aceptan variantes que Google suele escribir: zu, su, zoo, suu...) (`--voz-activacion ''` la quita). PARAR no la necesita.
 - Frases con dos colores («rojo y azul») o no reconocidas se ignoran y se imprime `[Voz] oi: "..." -> ignorado (motivo)`.
 - No hay orden de voz para `w` ni `q`: la prueba de marcha y la salida siguen siendo solo por teclado.
 - El teclado sigue funcionando a la vez; el mando Unitree y la tecla `O` siguen siendo la parada de emergencia real

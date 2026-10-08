@@ -19,7 +19,7 @@ Teclas (con foco en la ventana "Lo que ve el robot"; no distingue mayusculas):
     1  buscar y caminar a la caja roja         2  verde        3  azul
     ESPACIO o x  PARAR (IDLE inmediato)        q  salir (deja al robot quieto)
     w  prueba de marcha: camina recto 3 s sin usar la vision (aisla el problema)
-    Voz (--voz g1|pc): "robot, busca el rojo/verde/azul", "robot, inspecciona", "robot, quieto"; "para"/"alto" = PARAR
+    Voz (--voz g1|pc): "zuu, busca el rojo/verde/azul", "zuu, inspecciona", "zuu, quieto"; "para"/"alto" = PARAR
     b  reenviar el comando `start` (en --real: pulsar dos veces en 3 s)
 
 Robot real: la parada de emergencia de verdad es la tecla O en la terminal del deploy
@@ -441,7 +441,7 @@ def main():
     p.add_argument("--voz", choices=("off", "g1", "pc"), default="off",
                    help="ordenes por voz: g1 = microfono del robot, pc = microfono de la PC (ver voz_cajas.py)")
     p.add_argument("--voz-ip", default=None, help="IP de la PC en 192.168.123.x (multicast del microfono del G1)")
-    p.add_argument("--voz-activacion", default="robot", help="palabra de activacion ('' = sin palabra); PARAR no la necesita")
+    p.add_argument("--voz-activacion", default="zuu", help="palabra de activacion ('' = sin palabra); PARAR no la necesita")
     p.add_argument("--voz-umbral", type=float, default=500.0, help="nivel RMS minimo para detectar voz")
     p.add_argument("--voz-idioma", default="es-CO")
     p.add_argument("--dry-run", action="store_true",
@@ -537,8 +537,8 @@ def main():
         try:
             from voz_cajas import VozListener
             voz = VozListener(args.voz, args.voz_ip, args.voz_idioma, args.voz_activacion, args.voz_umbral).start()
-            print(f"[Voz] activa ({args.voz}). Frases: 'robot, busca el rojo/verde/azul', 'robot, inspecciona', "
-                  f"'robot, quieto'; 'para'/'alto' = PARAR (sin palabra de activacion).")
+            print(f"[Voz] activa ({args.voz}). Frases: 'zuu, busca el rojo/verde/azul', 'zuu, inspecciona', "
+                  f"'zuu, quieto'; 'para'/'alto' = PARAR (sin palabra de activacion).")
         except Exception as e:  # noqa: BLE001
             print(f"[Voz] no disponible ({type(e).__name__}: {e}); sigo solo con teclado. "
                   "Instala: pip install SpeechRecognition (pc: sounddevice).")

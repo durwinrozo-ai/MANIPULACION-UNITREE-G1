@@ -3,8 +3,8 @@
 
 Convierte frases en las mismas teclas de deploy_sonic_vision.py:
 
-    "robot, busca el rojo"      -> 1        "robot, ve al verde"  -> 2      "robot, azul" -> 3
-    "robot, inspecciona"        -> s        "robot, quieto"       -> 0
+    "zuu, busca el rojo"      -> 1        "zuu, ve al verde"  -> 2      "zuu, azul" -> 3
+    "zuu, inspecciona"        -> s        "zuu, quieto"       -> 0
     "para" / "alto" / "detente" -> ESPACIO (PARAR; NO necesita la palabra de activacion)
 
 Audio del G1: UDP multicast 239.168.123.161:5555, PCM 16 kHz mono 16 bit (mismo formato que usa
@@ -38,7 +38,8 @@ STOP_WORDS = {"para", "parar", "alto", "detente", "detener", "detenerse", "frena
 QUIET_WORDS = {"quieto", "quieta", "cero"}
 SCAN_WORDS = {"inspecciona", "inspeccionar", "inspeccion", "gira", "girar", "explora", "explorar", "busca", "buscar"}
 COLOR_WORDS = {"rojo": "1", "roja": "1", "verde": "2", "azul": "3"}
-WAKE_VARIANTS = {"robot", "robots", "robo"}
+# Google puede transcribir "zuu" de varias formas; se aceptan las parecidas
+WAKE_VARIANTS = {"zuu", "zuuu", "zu", "zuh", "suu", "su", "zoo", "zus"}
 
 
 def normalizar(texto):
@@ -47,7 +48,7 @@ def normalizar(texto):
     return "".join(c if c.isalnum() else " " for c in t).split()
 
 
-def interpretar(texto, palabra_activacion="robot"):
+def interpretar(texto, palabra_activacion="zuu"):
     """Devuelve (tecla, motivo). tecla es ' ', '0', 's', '1', '2', '3' o None.
     PARAR siempre funciona. El resto exige la palabra de activacion (si se configuro)."""
     w = normalizar(texto)
@@ -57,7 +58,7 @@ def interpretar(texto, palabra_activacion="robot"):
     if ws & STOP_WORDS:
         return " ", "parar"
     if palabra_activacion:
-        wake = {palabra_activacion.lower()} | (WAKE_VARIANTS if palabra_activacion.lower() == "robot" else set())
+        wake = {palabra_activacion.lower()} | (WAKE_VARIANTS if palabra_activacion.lower() == "zuu" else set())
         if not (ws & wake):
             return None, f"sin palabra de activacion '{palabra_activacion}'"
     colores = {COLOR_WORDS[x] for x in ws if x in COLOR_WORDS}
@@ -157,7 +158,7 @@ class PCMicSource:
 class VozListener:
     """Segmenta el audio en frases (por energia), las reconoce y deja las teclas en self.cmds."""
 
-    def __init__(self, fuente="g1", iface_ip=None, idioma="es-CO", palabra_activacion="robot",
+    def __init__(self, fuente="g1", iface_ip=None, idioma="es-CO", palabra_activacion="zuu",
                  umbral_min=500.0, verbose=True, reconocer=None):
         self.cmds = queue.Queue()
         self.idioma = idioma
@@ -266,7 +267,7 @@ def main():
     p.add_argument("--fuente", choices=("g1", "pc"), default="g1")
     p.add_argument("--ip", default=None, help="IP de la PC en 192.168.123.x (multicast del G1)")
     p.add_argument("--idioma", default="es-CO")
-    p.add_argument("--activacion", default="robot", help="palabra de activacion ('' = sin palabra)")
+    p.add_argument("--activacion", default="zuu", help="palabra de activacion ('' = sin palabra)")
     p.add_argument("--umbral", type=float, default=500.0, help="nivel RMS minimo para detectar voz")
     a = p.parse_args()
     v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral)
