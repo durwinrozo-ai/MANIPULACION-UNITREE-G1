@@ -546,6 +546,8 @@ def main():
     p.add_argument("--walk-speed", type=float, default=None, help="m/s (SLOW_WALK 0.1-0.8; sim 0.5 / real 0.2)")
     p.add_argument("--slow-speed", type=float, default=None, help="m/s al acercarse (sim 0.25 / real 0.15)")
     p.add_argument("--slow-y", type=float, default=0.80, help="y_max a partir del cual frena")
+    p.add_argument("--max-walk", type=float, default=REAL_MAX_WALK,
+                   help=f"tope de --walk-speed en --real (defecto {REAL_MAX_WALK}; SLOW_WALK admite hasta 0.8). Subir de a poco")
     p.add_argument("--stop-y", type=float, default=None,
                    help="y_max de llegada; 0.93 = ~0.85 m en el simulador. EN REAL hay que calibrarlo")
     p.add_argument("--arrive-ticks", type=int, default=5)
@@ -570,9 +572,13 @@ def main():
     args.walk_speed = args.walk_speed if args.walk_speed is not None else (0.2 if real else 0.5)
     args.slow_speed = args.slow_speed if args.slow_speed is not None else (0.15 if real else 0.25)
     if real:
-        if args.walk_speed > REAL_MAX_WALK:
-            print(f"[Seguridad] --walk-speed limitado a {REAL_MAX_WALK} m/s")
-            args.walk_speed = REAL_MAX_WALK
+        args.max_walk = float(np.clip(args.max_walk, 0.1, 0.8))
+        if args.max_walk > REAL_MAX_WALK:
+            print(f"[Seguridad] tope de velocidad real elevado a {args.max_walk} m/s (defecto {REAL_MAX_WALK}); "
+                  "operador con el mando y espacio libre.")
+        if args.walk_speed > args.max_walk:
+            print(f"[Seguridad] --walk-speed limitado a {args.max_walk} m/s")
+            args.walk_speed = args.max_walk
         args.slow_speed = min(args.slow_speed, args.walk_speed)
 
     hsv_rules = load_hsv_rules(args.hsv_file)

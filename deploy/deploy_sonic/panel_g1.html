@@ -156,7 +156,7 @@ function confirmarSI(){if(!$('okSafe').checked){alert('Marca primero la casilla 
  if(confirm('El robot debe estar de pie, con espacio libre y un operador con el mando.\n¿Enviar SI y habilitar el planner?'))post('/api/confirmar_si')}
 const FIELDS=[['robot_user','Usuario robot'],['robot_pc2','IP PC2 (cámara)'],['robot_pc1','IP PC1'],['pc_ip','IP de esta PC'],['iface','Interfaz de red'],
  ['gr00t','Carpeta GR00T'],['repo_dir','Carpeta del repo'],['hsv_file','Archivo HSV'],['mic_nombre','Nombre del micrófono'],['udp_puerto','Puerto UDP audio'],
- ['stop_y','stop-y (parada)'],['walk_speed','Velocidad m/s (máx real 0.3)'],['scan_ang_vel','Giro rad/s'],['voz_activacion','Palabra de activación'],
+ ['stop_y','stop-y (parada)'],['walk_speed','Velocidad de avance m/s'],['max_walk','Tope de velocidad real m/s (máx 0.8)'],['slow_y','y_max donde empieza a frenar'],['slow_speed','Velocidad de acercamiento m/s'],['scan_ang_vel','Giro rad/s'],['voz_activacion','Palabra de activación'],
  ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)']];
 function buildForm(){const f=$('form');f.innerHTML='';for(const [k,l] of FIELDS){const v=S.cfg[k];const lab=document.createElement('label');lab.textContent=l;
  let i;if(typeof v==='boolean'){i=document.createElement('input');i.type='checkbox';i.checked=v}else{i=document.createElement('input');i.value=v}
