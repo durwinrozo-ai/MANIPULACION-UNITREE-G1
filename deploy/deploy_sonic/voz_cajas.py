@@ -272,6 +272,9 @@ def main():
     a = p.parse_args()
     v = VozListener(a.fuente, a.ip, a.idioma, a.activacion, a.umbral)
     v.start()
+    if a.fuente == "g1":
+        print(f"[Voz] escuchando {G1_MIC_GROUP}:{G1_MIC_PORT} con la IP de la PC = {v.src.iface_ip} "
+              "(si no es la del cable 192.168.123.x, usa --ip)")
     print(f"[Voz] fuente={a.fuente} activacion='{a.activacion}'. Habla; Ctrl+C para salir.")
     t0 = time.time()
     try:
