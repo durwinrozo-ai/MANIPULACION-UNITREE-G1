@@ -45,6 +45,7 @@ DEFAULT_CFG = {
     "voz_activacion": "zuu", "voz_umbral": 300, "voz_idioma": "es-CO",
     "usar_voz": True, "usar_mic": True, "dry_run": False,
     "vision_port": 8765, "modo": "real",
+    "usar_pico": False, "pico_pc_ip": "192.168.123.104", "pico_modo": "ego", "pico_seguro": "habilitar", "pico_env": "tv",
     "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5567, "depth_far": 4.0,
 }
 
@@ -228,10 +229,13 @@ class Proc:
 
 
 PHRASES = collections.deque(maxlen=12)
+PICO = {"visor": False, "gafas": False, "ultimo": "", "t": 0.0}  # estado que publica pico_visor.py
+PORT_PANEL = {"v": 8080}
+PICO_FLAGS = {"probar": False}
 PROCS = {n: Proc(n, t) for n, t in [
     ("cam", "A · Cámara del robot (PC2)"), ("mic", "M · Micrófono del robot"),
     ("sim", "1 · Simulador MuJoCo"), ("deploy", "2 · Deploy SONIC"),
-    ("vision", "3 · Programa de cajas"), ("voz", "V · Prueba de voz"),
+    ("vision", "3 · Programa de cajas"), ("pico", "P · Lentes Pico 4 y mandos"), ("voz", "V · Prueba de voz"),
     ("util", "U · Utilidades (scp, calibrar)")]}
 
 
@@ -289,6 +293,17 @@ def start_proc(name, real=None):
                   f"--voz-umbral {c['voz_umbral']}", f"--voz-idioma {c['voz_idioma']}"]
         return P.start(venv_prefix() + f"python {sh_q(sd)}/deploy_sonic_vision.py " + " ".join(a),
                        ready=r"comando start enviado|start reenviado", error=r"\[ERROR\]|Traceback|Address already in use")
+    if name == "pico":
+        act = ('for c in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" /opt/conda; do '
+               '[ -f "$c/etc/profile.d/conda.sh" ] && . "$c/etc/profile.d/conda.sh" && break; done; '
+               f"conda activate {sh_q(c['pico_env'])} && ")
+        PICO.update(visor=False, gafas=False, ultimo="", t=0.0)
+        a = [f"--panel http://127.0.0.1:{PORT_PANEL['v']}", f"--vision-port {c['vision_port']}",
+             f"--modo {c['pico_modo']}", f"--seguro {c['pico_seguro']}"]
+        if PICO_FLAGS["probar"]:
+            a.append("--probar")
+        return P.start(act + f"python {sh_q(sd)}/pico_visor.py " + " ".join(a),
+                       ready=r"visor web listo", error=r"Traceback|Address already in use|ERROR|No such file")
     if name == "voz":
         return P.start(venv_prefix() + f"python {sh_q(sd)}/voz_cajas.py --fuente udp --puerto {c['udp_puerto']} "
                        f"--activacion {sh_q(c['voz_activacion'])} --umbral {c['voz_umbral']}",
@@ -454,6 +469,7 @@ def _step(i, state):
 
 def run_start_all(real):
     SEQ.update(running=True, cancel=False, msg="")
+    PICO_FLAGS["probar"] = False
     plan = []
     if real:
         plan.append(("Cámara del robot (A)", "cam", 90))
@@ -463,6 +479,8 @@ def run_start_all(real):
     else:
         plan += [("Simulador MuJoCo (1)", "sim", 120), ("Deploy SONIC (2)", "deploy", 120)]
     plan.append(("Programa de cajas (3)", "vision", 40))
+    if CFG.get("usar_pico"):
+        plan.append(("Lentes Pico 4 (P)", "pico", 60))
     SEQ["steps"] = [{"txt": t, "state": "pendiente"} for t, _, _ in plan]
     try:
         for i, (txt, name, tmo) in enumerate(plan):
@@ -500,7 +518,7 @@ def run_stop_all():
     SEQ.update(running=True, cancel=True)
     time.sleep(0.2)
     SEQ.update(cancel=False, msg="")
-    order = [("1) ESPACIO (robot quieto)", None), ("2) Programa de cajas (q)", "vision"), ("3) Deploy SONIC", "deploy"),
+    order = [("1) ESPACIO (robot quieto)", None), ("1b) Lentes Pico 4", "pico"), ("2) Programa de cajas (q)", "vision"), ("3) Deploy SONIC", "deploy"),
              ("4) Micrófono", "mic"), ("5) Cámara del robot", "cam"), ("6) Simulador / pruebas", "sim")]
     SEQ["steps"] = [{"txt": t, "state": "pendiente"} for t, _ in order]
     try:
@@ -563,12 +581,20 @@ def vision_voz(on):
         return False
 
 
+def pico_info():
+    d = dict(PICO)
+    d["activo"] = PROCS["pico"].alive() and time.time() - PICO.get("t", 0) < 3.0
+    d["url_vuer"] = f"https://vuer.ai?ws=wss://{CFG['pico_pc_ip']}:8012"
+    d["url_local"] = f"https://{CFG['pico_pc_ip']}:8012"
+    return d
+
+
 def state_json(log=None, since=0):
     vs = vision_status()
     out = {
         "cfg": {k: v for k, v in CFG.items()}, "procs": [p.info() for p in PROCS.values()],
         "checks": CHECKS, "vision": vs, "phrases": list(PHRASES), "seq": SEQ,
-        "pw_set": bool(PASSWORD["v"]), "cam": RAW.info(), "vision_port": CFG["vision_port"],
+        "pw_set": bool(PASSWORD["v"]), "cam": RAW.info(), "pico": pico_info(), "vision_port": CFG["vision_port"],
     }
     if log in PROCS:
         P = PROCS[log]
@@ -639,6 +665,9 @@ class H(BaseHTTPRequestHandler):
             if act == "start":
                 if name == "util":
                     ok = run_util(body.get("kind", ""))
+                elif name == "pico":
+                    PICO_FLAGS["probar"] = body.get("kind") == "probar"
+                    ok = start_proc(name, real)
                 else:
                     ok = start_proc(name, real)
                 return self._json({"ok": bool(ok)})
@@ -656,6 +685,9 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": PROCS[name].send(str(body.get("text", "")), body.get("newline", True))})
         elif p == "/api/key":
             return self._json({"ok": vision_key(str(body.get("k", ""))[:1] or "")})
+        elif p == "/api/pico_status":
+            PICO.update({k: v for k, v in body.items()}, t=time.time())
+            return self._json({"ok": True})
         elif p == "/api/emergencia":
             vision_key(" ")
             ok = PROCS["deploy"].send("O", newline=False)
@@ -702,6 +734,7 @@ def main():
     sys.path.insert(0, HERE)
     CFG.setdefault("modo", "real")
     threading.Thread(target=checker, daemon=True).start()
+    PORT_PANEL["v"] = a.port
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     srv.daemon_threads = True
     print(f"Panel en http://127.0.0.1:{a.port}   (Ctrl+C para cerrar; detiene los procesos lanzados desde aqui)")
@@ -710,7 +743,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        for n in ("vision", "deploy", "mic", "cam", "sim", "voz", "util"):
+        for n in ("pico", "vision", "deploy", "mic", "cam", "sim", "voz", "util"):
             PROCS[n].stop(3)
         RAW.stop()
 

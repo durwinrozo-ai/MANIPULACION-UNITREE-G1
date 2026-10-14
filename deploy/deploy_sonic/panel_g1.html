@@ -36,6 +36,7 @@ input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid 
 .form{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}.form label{display:grid;gap:2px;font-size:12px;color:var(--mut)}
 .steps{margin:8px 0 0;padding:0;list-style:none}.steps li{padding:2px 0}
 .phr{font-size:13px;margin:0;padding:0;list-style:none;max-height:130px;overflow:auto}.phr li{padding:2px 0;border-bottom:1px dashed var(--line)}.phr span{color:var(--mut);margin-right:6px}
+table.mini{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px}table.mini th,table.mini td{border:1px solid var(--line);padding:3px 6px;text-align:left}table.mini th{background:#00000010}
 .tl{list-style:none;margin:0;padding:0}.tl li{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}.tl li:last-child{border:0}
 .tag{font-size:11px;border-radius:5px;padding:1px 6px;height:max-content;white-space:nowrap}.t-ok{background:rgba(60,207,122,.18);color:var(--ok)}.t-pend{background:rgba(242,184,75,.18);color:var(--warn)}
 .msg{margin-top:8px;color:var(--warn)}
@@ -92,6 +93,30 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
     </div>
     <p style="margin:8px 0 4px;color:var(--mut)">Di «<b id="wake">zuu</b>, busca el rojo / verde / azul», «zuu, inspecciona», «zuu, quieto». «Para» o «alto» = PARAR (no sirve como parada de emergencia).</p>
     <ul class="phr" id="phr"><li><span>—</span>sin frases todavía</li></ul>
+  </div>
+
+  <div class="card">
+    <h2>Lentes Pico 4 y mandos</h2>
+    <div class="row">
+      <button class="pri" onclick="proc('pico','start')" id="pk_on">🥽 Iniciar visor</button>
+      <button onclick="proc('pico','stop')" id="pk_off">Detener visor</button>
+      <button onclick="post('/api/proc',{name:'pico',action:'start',kind:'probar'})" title="muestra qué botones detecta y no manda nada al robot">🧪 Probar mandos</button>
+    </div>
+    <div class="row" style="margin-top:8px" id="pk_pills"></div>
+    <div class="row" style="margin-top:8px">
+      <label class="row">Vista <select id="pk_modo" onchange="post('/api/config',{pico_modo:this.value})"><option value="ego">ego · ventana con el entorno real</option><option value="immersive">inmersiva · todo el campo visual</option></select></label>
+      <label class="row">Seguro <select id="pk_seg" onchange="post('/api/config',{pico_seguro:this.value})"><option value="habilitar">habilitar · grip al dar el destino</option><option value="mantener">mantener · grip todo el trayecto</option><option value="off">sin grip (no recomendado)</option></select></label>
+      <label class="row"><input type="checkbox" id="pk_auto" onchange="post('/api/config',{usar_pico:this.checked})"> Incluir en «Arrancar todo»</label>
+    </div>
+    <p style="margin:8px 0 2px;color:var(--mut)">En las gafas (navegador del Pico, barra de direcciones): <b id="pk_url" style="user-select:all"></b>
+      <button onclick="navigator.clipboard&&navigator.clipboard.writeText($('pk_url').textContent)">Copiar</button>
+      → «Virtual Reality». Primera vez: abrir antes <span id="pk_url2" style="user-select:all"></span> y aceptar el certificado.</p>
+    <table class="mini"><tr><th>Mando</th><th>Orden</th><th>Mando</th><th>Orden</th></tr>
+      <tr><td><b>A</b> (der.)</td><td>🟥 Rojo</td><td><b>X</b> (izq.)</td><td>🟦 Azul</td></tr>
+      <tr><td><b>B</b> (der.)</td><td>🟩 Verde</td><td><b>Y</b> (izq.) mantener</td><td>🚶 Avanzar recto (al soltar: PARAR)</td></tr>
+      <tr><td>Gatillo der.</td><td>🔄 Inspeccionar</td><td>Gatillo izq.</td><td><b>PARAR</b> (siempre)</td></tr>
+      <tr><td>Clic joystick</td><td>⏸ Quieto</td><td>Grip (lateral)</td><td>Seguro: habilita las órdenes de movimiento</td></tr></table>
+    <p style="margin:6px 0 0;color:var(--mut)">Lo que ven las gafas es lo mismo que el panel (programa de cajas o la cámara elegida arriba). La parada de emergencia real sigue siendo el mando Unitree o la tecla <b>O</b>.</p>
   </div>
 </section>
 
@@ -153,7 +178,7 @@ function confirmarSI(){if(!$('okSafe').checked){alert('Marca primero la casilla 
 const FIELDS=[['robot_user','Usuario robot'],['robot_pc2','IP PC2 (cámara)'],['robot_pc1','IP PC1'],['pc_ip','IP de esta PC'],['iface','Interfaz de red'],
  ['gr00t','Carpeta GR00T'],['repo_dir','Carpeta del repo'],['hsv_file','Archivo HSV'],['mic_nombre','Nombre del micrófono'],['udp_puerto','Puerto UDP audio'],
  ['stop_y','stop-y (parada)'],['walk_speed','Velocidad de avance m/s'],['max_walk','Tope de velocidad real m/s (máx 0.8)'],['slow_y','y_max donde empieza a frenar'],['slow_speed','Velocidad de acercamiento m/s'],['scan_ang_vel','Giro rad/s'],['voz_activacion','Palabra de activación'],
- ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)'],['depth_far','Profundidad: alcance de la escala (m)'],['depth_port','Puerto de profundidad (robot)'],['sim_depth_port','Puerto de profundidad (simulador)']];
+ ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)'],['pico_pc_ip','Pico: IP de esta PC en la red del visor'],['pico_env','Pico: entorno conda'],['depth_far','Profundidad: alcance de la escala (m)'],['depth_port','Puerto de profundidad (robot)'],['sim_depth_port','Puerto de profundidad (simulador)']];
 function buildForm(){const f=$('form');f.innerHTML='';for(const [k,l] of FIELDS){const v=S.cfg[k];const lab=document.createElement('label');lab.textContent=l;
  let i;if(typeof v==='boolean'){i=document.createElement('input');i.type='checkbox';i.checked=v}else{i=document.createElement('input');i.value=v}
  i.id='f_'+k;lab.appendChild(i);f.appendChild(lab)}cfgBuilt=true}
@@ -195,6 +220,21 @@ function render(){
  // seguridad
  const okS=$('okSafe').checked||!modoReal();$('safe').style.display=modoReal()?'block':'none';
  document.querySelectorAll('.mv').forEach(b=>b.disabled=!okS||!v);
+
+ // lentes Pico 4
+ {const k=S.pico||{},pp=P.pico;
+  $('pk_on').disabled=pp.alive;$('pk_off').disabled=!pp.alive;
+  if(document.activeElement!==$('pk_modo'))$('pk_modo').value=S.cfg.pico_modo;
+  if(document.activeElement!==$('pk_seg'))$('pk_seg').value=S.cfg.pico_seguro;
+  $('pk_auto').checked=!!S.cfg.usar_pico;$('pk_url').textContent=k.url_vuer||'';$('pk_url2').textContent=k.url_local||'';
+  let q=pill('Visor '+(pp.alive?(k.activo?'activo':pp.state):'apagado'),pp.alive&&k.activo?'ok':pp.alive?'warn':'');
+  if(k.activo){q+=pill('Gafas '+(k.gafas?'conectadas':'sin conectar'),k.gafas?'ok':'warn');
+   q+=pill('Video '+(k.video_ok?(k.fuente==='programa'?'del programa':'cámara cruda'):'sin imagen'),k.video_ok?'ok':'err');
+   q+=pill('Seguro '+(k.seguro_on?'ON':'OFF')+' ('+k.seguro+')',k.seguro_on?'ok':'');
+   if(k.probar)q+=pill('PRUEBA: no manda órdenes','warn');
+   if(k.botones&&k.botones.length)q+=pill('Botones: '+k.botones.join(' '),'ok');
+   if(k.ultimo)q+=pill('Último: '+k.ultimo,'ok');if(k.bloqueo)q+=pill(k.bloqueo,'err')}
+  $('pk_pills').innerHTML=q}
  // procesos
  const list=modoReal()?['cam','mic','deploy','vision']:['sim','deploy','vision'];
  $('procs').innerHTML=list.map(n=>{const p=P[n];return `<div class="proc"><i class="dot ${dotc(p.state)}"></i><div><b>${p.title}</b><br><small>${p.state}${p.alive?' · '+p.uptime+' s':''}${p.aviso?' · '+p.aviso:''}</small></div>

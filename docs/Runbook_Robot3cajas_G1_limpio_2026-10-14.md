@@ -2,7 +2,7 @@
 
 **Versión limpia · 14/10/2026** · Robot real (G1 de 29 GDL) y simulador MuJoCo · se opera con el panel web.
 
-El robot inspecciona, busca la caja roja, verde o azul, camina hacia ella y se detiene cuando su borde inferior llega a `y_max = 0.93` (igual para los tres colores). Se maneja con botones del panel, con teclado o por voz («zuu, busca el rojo»).
+El robot inspecciona, busca la caja roja, verde o azul, camina hacia ella y se detiene cuando su borde inferior llega a `y_max = 0.93` (igual para los tres colores). Se maneja con botones del panel, con teclado, por voz («zuu, busca el rojo») o con los mandos de los lentes Pico 4.
 
 ## 1. Qué hay y dónde corre
 
@@ -15,6 +15,7 @@ El robot inspecciona, busca la caja roja, verde o azul, camina hacia ella y se d
 | `mic_stream_g1.py`, `voz_cajas.py` | Robot → PC (UDP `:5600`) | Voz con el micrófono Insta360 del robot |
 | `run_sim_3colores.py`, `sim_depth.py` | PC | Simulador MuJoCo con las 3 cajas y cámara (RGB `:5555`, profundidad `:5567`) |
 | `depth_cam.py` | PC | Receptor/visor de profundidad (PNG 16 bits en mm, 0 = sin dato) |
+| `pico_visor.py` | PC (entorno conda `tv`) | Lentes Pico 4: muestra lo que ve el robot y los mandos eligen el destino |
 
 Red: PC1 `192.168.123.161`, PC2 `192.168.123.164`, PC del laboratorio `192.168.123.222` (`enp131s0`).
 
@@ -92,14 +93,51 @@ El micrófono Insta360 va por USB-C al robot: `mic_stream_g1.py` lo envía por U
 
 Frases: «zuu, busca el rojo / verde / azul», «inspecciona», «quieto». **«Para» o «alto» detienen el planner** (no sustituyen la parada de emergencia).
 
-## 9. Cerrar una prueba
+## 9. Lentes Pico 4 y mandos
+
+Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con su detección y estado; si ese no está, la cámara cruda que elijas con los botones RGB / Profundidad) y los mandos del Pico eligen el destino del robot. El panel sigue mostrando todo igual. El programa es `pico_visor.py`, que corre en el entorno conda `tv` y envía las mismas teclas que el panel.
+
+**Una sola vez:** entorno conda `tv` con `televuer` (runbook del Pico: `runbook-pico4-camara-pc`), certificado en `~/.config/xr_teleoperate/{cert,key}.pem`, `sudo ufw allow 8012`, y el Pico en la misma red que la PC. En Ajustes, «Pico: IP de esta PC en la red del visor» (por defecto `192.168.123.104`; cambia por DHCP, verifícala con `ip -4 addr show`).
+
+**Cada vez:**
+1. Arranca todo como siempre (robot real o simulador + programa de cajas).
+2. En el panel, tarjeta **Lentes Pico 4 y mandos** → **Iniciar visor** (o marca «Incluir en Arrancar todo»). Deben verse «Visor activo» y «Video del programa».
+3. En el navegador del Pico (barra de direcciones, no el buscador): la primera vez abre `https://<IP>:8012` y acepta el certificado; después `https://vuer.ai?ws=wss://<IP>:8012` → **Virtual Reality**. El panel muestra «Gafas conectadas».
+4. Vista **ego** (ventana con el entorno real alrededor, recomendada para trabajar con el robot) o **inmersiva**. Si solo ves la cuadrícula, gira y mira alrededor.
+
+| Mando | Orden |
+|---|---|
+| **A** (derecho) | Rojo |
+| **B** (derecho) | Verde |
+| **X** (izquierdo) | Azul |
+| **Y** (izquierdo), mantener | Avanzar recto (repite `w`; al soltar: PARAR) |
+| Gatillo derecho | Inspeccionar |
+| Gatillo izquierdo | **PARAR** (siempre funciona) |
+| Clic de un joystick | Quieto |
+| Grip (lateral) | Seguro |
+
+**Seguro (se elige en el panel):** *habilitar* (por defecto): para dar un destino hay que tener un grip apretado en ese momento; *mantener*: además, si sueltas los dos grips el robot recibe PARAR; *sin grip*: no recomendado con el robot real. La barra inferior de las gafas muestra la leyenda de los botones, el estado del seguro y la última orden. La parada de emergencia real sigue siendo el mando Unitree o la tecla `O`.
+
+**Probar mandos** (botón del panel): muestra qué botones detecta y **no envía nada al robot**. Úsalo la primera vez para confirmar que X/Y corresponden al mando izquierdo.
+
+| Síntoma | Solución |
+|---|---|
+| `no encuentro 'televuer'` | El panel lanza el visor con `conda activate tv`; cambia el entorno en Ajustes («Pico: entorno conda») |
+| Puerto 8012 en uso | Otra copia del visor o `test_pico_local.py` abierto: ciérralo |
+| «Gafas sin conectar» | Abre la URL en el Pico y pulsa Virtual Reality; revisa la IP (Ajustes) y el certificado |
+| Órdenes bloqueadas «mantén un grip apretado» | Aprieta un grip al pulsar (modo habilitar/mantener) |
+| Las gafas dicen «Sin imagen del robot» | Inicia el programa de cajas o una cámara (RGB / Profundidad) en el panel |
+
+**Estado:** probado con gafas simuladas (mapeo de botones, envío de teclas al panel, estados en el panel, cierre ordenado). **Falta probar con el Pico real:** nombres de botones, posición del plano de imagen, latencia y el visor completo con `televuer`.
+
+## 10. Cerrar una prueba
 
 1. **PARAR** (ESPACIO): robot quieto.
 2. **Detener todo** en el panel (cierra programa de cajas, deploy, micrófono y cámara en orden).
 3. Robot sentado o en arnés.
 4. Antes de relanzar: `fuser 5556/tcp` vacío (si no, botón **Liberar puerto 5556**).
 
-## 10. Problemas frecuentes
+## 11. Problemas frecuentes
 
 | Síntoma | Solución |
 |---|---|
@@ -114,7 +152,7 @@ Frases: «zuu, busca el rojo / verde / azul», «inspecciona», «quieto». **«
 | Dice `LLEGO` sin caminar | La caja ya está más cerca que la parada; alejarla |
 | El robot no camina | Ver `Planner enabled`, `avanzando mode=1` en el programa de cajas y `SLOW_WALK` en el deploy |
 
-## 11. Estado de la validación
+## 12. Estado de la validación
 
 **Verificado:** cámara RGB real (30 fps), detección de los 3 colores, panel completo con procesos simulados, contraseña/ssh, simulador con el panel, `Planner enabled`, micrófono → UDP → reconocimiento (prueba aislada), pipeline de profundidad con RealSense simulada.
 
