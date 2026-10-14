@@ -8,8 +8,11 @@ Igual que gear_sonic/scripts/run_sim_loop.py, pero:
 
 Uso (Terminal 1, entorno .venv_teleop, desde la raiz de GR00T-WholeBodyControl):
     python <ruta>/deploy/deploy_sonic/run_sim_3colores.py
+    SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5557
 """
+import os
 import pathlib
+import sys
 from typing import Dict
 
 import tyro
@@ -61,6 +64,10 @@ def main(config: SimLoopConfig):
         offscreen=wbc_config.get("ENABLE_OFFSCREEN", False),
         enable_image_publish=config.enable_image_publish,
     )
+    if os.environ.get("SIM_DEPTH") == "1":  # profundidad de head_camera (ver sim_depth.py)
+        sys.path.insert(0, str(HERE))
+        from sim_depth import install_depth_publisher
+        install_depth_publisher(sim_wrapper.sim)
     SimulatorFactory.start_simulator(
         sim_wrapper.sim,
         as_thread=False,

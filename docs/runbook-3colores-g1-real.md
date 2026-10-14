@@ -34,6 +34,11 @@ coordenadas de las cajas (2.8 m, mismos ángulos) se mantienen. Las cajas no tie
 | `run_sim_3colores.py` | Lanza MuJoCo como `run_sim_loop.py`, agrega las cajas a la escena que ya use tu configuración y activa la publicación de la cámara |
 | `escena_cajas.xml.template` | Plantilla que incluye la escena original y añade las 3 cajas (el lanzador la copia junto a la escena original) |
 | `deploy_sonic_vision.py` | Recibe la cámara, detecta colores, publica `command`/`planner` a SONIC y muestra "lo que ve el robot" |
+| `panel_g1.py` + `panel_g1.html` | Panel de control web (arranque/cierre de terminales, cámaras, teclas, voz) |
+| `depth_cam.py` | Receptor y visor de la profundidad (PNG de 16 bits en mm), usado por el panel; también se ejecuta suelto |
+| `sim_depth.py` | Publica la profundidad de `head_camera` de MuJoCo (se activa con `SIM_DEPTH=1` en `run_sim_3colores.py`) |
+| `robot/realsense_pub.py` | Corre en el PC2: publica RGB (:55555) y profundidad (:55557) de la RealSense del G1 |
+| `robot/start_camera.sh` | Corre en el PC2: libera la cámara y arranca teleimager (RGB) o `realsense_pub.py` con el argumento `rgbd` |
 
 ## Arranque (cada sesión, en este orden)
 
@@ -399,7 +404,7 @@ python $REPO/deploy/deploy_sonic/panel_g1.py          # abrir http://127.0.0.1:8
 
 - **Arriba:** modo *Robot real* / *Simulador MuJoCo*, luces de estado (ping a PC1/PC2, interfaz, cámara, micrófono, deploy, programa de cajas, voz),
   **Arrancar todo** (A → M → 2 → 3 con espera de cada `listo`), **Detener todo** (el orden de cierre del runbook) y **EMERGENCIA** (ESPACIO + tecla `O` al deploy).
-- **Lo que ve el robot:** video del programa de cajas con su estado (objetivo, `y_max`, velocidad, Hz). «Ver cámara» muestra la cámara sin procesar aunque el programa esté apagado.
+- **Lo que ve el robot:** video del programa de cajas con su estado (objetivo, `y_max`, velocidad, Hz) y botones **RGB / Profundidad / RGB + profundidad** que muestran las cámaras aunque el programa esté apagado (ver «Cámaras RGB y de profundidad»).
 - **Control:** botones de `s`, `1/2/3`, `0`, `w`, `b` y PARAR (también funcionan las teclas con el foco en la página). En modo real los de movimiento exigen marcar la casilla de seguridad.
 - **Voz y micrófono:** activa el emisor del Insta360 en el robot, interruptor «Aceptar órdenes de voz» (sin reiniciar), prueba de voz y las últimas frases oídas.
 - **Conexiones:** Iniciar/Detener/Ver registro de cada terminal; responde `y` al deploy solo; el `SI` del modo real **siempre lo confirmas tú** con un botón.
@@ -421,6 +426,36 @@ python $REPO/deploy/deploy_sonic/panel_g1.py          # abrir http://127.0.0.1:8
 
 El programa de cajas expone un puente local con `--panel-port 8765` (lo usa el panel; con `--no-gui` no abre la ventana de OpenCV).
 Probado con un deploy y una cámara simulados (arranque, `y` automático, teclas, emergencia, cierre ordenado); **falta probarlo con el robot real**.
+
+## Cámaras RGB y de profundidad (robot real y MuJoCo)
+
+En el panel, bajo «Lo que ve el robot», la fila **Cámara** tiene cuatro botones: **📷 RGB**, **🌈 Profundidad**, **⧉ RGB + profundidad** y **Ocultar**.
+La profundidad se muestra con un mapa de color (cerca = cálido, lejos = frío, negro = sin dato), una mira central con la **distancia en metros** y una barra de escala
+(alcance configurable en Ajustes, 4 m por defecto). Con el programa de cajas encendido, «RGB» muestra su imagen con la detección; «Profundidad» y «RGB + profundidad» usan la vista propia del panel.
+
+| | Robot real | Simulador MuJoCo |
+|---|---|---|
+| RGB | `head_camera` por teleimager o por `realsense_pub.py` (puerto 55555) | `head_camera` del modelo (puerto 5555) |
+| Profundidad | **`realsense_pub.py`** en el PC2 (puerto 55557) | `SIM_DEPTH=1` en `run_sim_3colores.py` (puerto 5557) |
+| Cómo se activa | Panel → «Servidor de cámara del robot» → **RealSense propio · RGB + profundidad** (reinicia la cámara A) | Panel → casilla **Simulador con profundidad** (reiniciar el simulador) |
+
+**Formato de la profundidad (igual en real y simulador):** un PNG de 16 bits por mensaje ZMQ, profundidad en **milímetros** alineada al color, 0 = sin dato (`depth_cam.py` lo decodifica).
+
+**Por qué hay un servidor propio en el robot real:** `teleimager-server` solo publica el color (su código ya tiene el flujo de profundidad pero no lo activa ni lo envía por ZMQ) y la RealSense no admite dos procesos a la vez.
+`realsense_pub.py` abre la cámara una sola vez y publica el color como JPEG en el **mismo** puerto 55555 (el programa de cajas funciona sin cambios) y la profundidad en el 55557.
+Se lanza con `bash ~/start_camera.sh rgbd` (el panel lo hace solo); `bash ~/start_camera.sh` sin argumento sigue arrancando teleimager (solo RGB, validado). La primera vez usar **Preparar robot (scp)**, que ahora copia también `realsense_pub.py`.
+
+Uso suelto: `python depth_cam.py --host 192.168.123.164 --port 55557` abre una ventana con la profundidad.
+
+**Estado:** probado con una RealSense simulada (publicador → receptor, distancia al centro correcta, modos RGB/profundidad/ambos del panel) y con el render de profundidad de MuJoCo sobre un modelo de prueba.
+**Falta probar** con la RealSense real del G1 (`rgbd`: fps de color y profundidad, carga de red) y con la escena completa del G1 en MuJoCo (`SIM_DEPTH=1`).
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| «No llega profundidad» sobre el video (real) | La cámara corre con teleimager (solo RGB) | «Servidor de cámara del robot» → RealSense propio y reiniciar A; si es la primera vez, «Preparar robot (scp)» |
+| «No llega profundidad» (simulador) | El simulador se lanzó sin `SIM_DEPTH=1` | Marcar «Simulador con profundidad» y reiniciar el simulador |
+| `[rs] ERROR al abrir la RealSense` | Otro proceso (videohub_pc4, teleimager) tiene la cámara | `start_camera.sh` los libera; botón «¿Quién usa la cámara?» |
+| Profundidad con muchos huecos negros | Superficies brillantes/oscuras, muy cerca (<0.2 m) o lejos | Normal en la D435i; acercarse o cambiar de ángulo |
 
 ## Cierre de una prueba (detener todo)
 

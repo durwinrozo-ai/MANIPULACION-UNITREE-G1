@@ -45,6 +45,7 @@ DEFAULT_CFG = {
     "voz_activacion": "zuu", "voz_umbral": 300, "voz_idioma": "es-CO",
     "usar_voz": True, "usar_mic": True, "dry_run": False,
     "vision_port": 8765, "modo": "real",
+    "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5557, "depth_far": 4.0,
 }
 
 
@@ -256,14 +257,17 @@ def start_proc(name, real=None):
     real = c.get("modo", "real") == "real" if real is None else real
     sd = os.path.join(c["repo_dir"], "deploy", "deploy_sonic")
     if name == "cam":
-        return P.start(ssh_cmd("bash ~/start_camera.sh"), ready=r"head_camera is ready|Running\.\.\.",
-                       error=r"busy|Failed to initialize|Permission denied|No route|timed out")
+        rgbd = c.get("cam_server") == "rgbd"
+        return P.start(ssh_cmd("bash ~/start_camera.sh" + (" rgbd" if rgbd else "")),
+                       ready=r"head_camera is ready|Running\.\.\.|\[rs\] publicando",
+                       error=r"busy|Failed to initialize|Permission denied|No route|timed out|\[rs\] ERROR")
     if name == "mic":
         remote = (f"python3 ~/mic_stream_g1.py --nombre {c['mic_nombre']} --destino {c['pc_ip']} "
                   f"--puerto {c['udp_puerto']}")
         return P.start(ssh_cmd(remote), ready=r"enviados \d+ bloques", error=r"No such file|Permission denied|error|no hay|No se encontro")
     if name == "sim":
-        return P.start(venv_prefix() + f"python {sh_q(sd)}/run_sim_3colores.py",
+        env = f"SIM_DEPTH=1 SIM_DEPTH_PORT={int(c['sim_depth_port'])} " if c.get("sim_depth") else ""
+        return P.start(venv_prefix() + env + f"python {sh_q(sd)}/run_sim_3colores.py",
                        ready=r"Sensor server running", error=r"Traceback|Error")
     if name == "deploy":
         iface = c["iface"] if real else "sim"
@@ -297,9 +301,9 @@ def run_util(kind):
     P = PROCS["util"]
     sd = os.path.join(c["repo_dir"], "deploy", "deploy_sonic")
     if kind == "scp":
-        files = f"{sh_q(sd)}/mic_stream_g1.py {sh_q(sd)}/robot/start_camera.sh"
+        files = f"{sh_q(sd)}/mic_stream_g1.py {sh_q(sd)}/robot/start_camera.sh {sh_q(sd)}/robot/realsense_pub.py"
         cmd = (f"scp -o StrictHostKeyChecking=accept-new {files} {c['robot_user']}@{c['robot_pc2']}:~/ "
-               f"&& echo '[OK] archivos copiados al robot (~/mic_stream_g1.py, ~/start_camera.sh)'")
+               f"&& echo '[OK] archivos copiados al robot (~/mic_stream_g1.py, ~/start_camera.sh, ~/realsense_pub.py)'")
         return P.start(cmd, ready=r"\[OK\]", error=r"Permission denied|No such file|lost connection|timed out")
     if kind == "calibrar":
         return P.start(venv_prefix() + f"python {sh_q(sd)}/deploy_sonic_vision.py --source g1 --calibrar "
@@ -351,49 +355,79 @@ def checker():
 # ---------------------------------------------------------------------------
 # Camara cruda del panel (antes de lanzar el programa de vision)
 # ---------------------------------------------------------------------------
-class RawCam:
+class CamHub:
+    """Camaras que el panel muestra por su cuenta: RGB y/o PROFUNDIDAD (robot real o simulador).
+    Modos: off | rgb | depth | both. Solo se suscribe a la profundidad cuando se pide (ahorra red)."""
+
     def __init__(self):
-        self.rx = None
-        self.mode = None
+        self.rgb = None
+        self.dep = None
+        self.mode = "off"
+        self.real = None
+        self.dist = None
         self.lock = threading.Lock()
 
-    def ensure(self, real):
+    def _stop_rx(self, rx):
+        if rx is not None:
+            rx.stop = True
+
+    def ensure(self, real, mode):
         import deploy_sonic_vision as dv  # misma carpeta
+        import depth_cam as dc
         with self.lock:
-            mode = "real" if real else "sim"
-            if self.rx is not None and self.mode == mode:
-                return
-            if self.rx is not None:
-                self.rx.stop = True
-            self.mode = mode
-            self.rx = dv.G1Receiver(CFG["robot_pc2"], 55555) if real else dv.SimReceiver("127.0.0.1", 5555, "ego_view")
-            self.rx.start()
+            if self.real is not None and self.real != real:
+                self._stop_rx(self.rgb); self._stop_rx(self.dep); self.rgb = self.dep = None
+            self.real, self.mode = real, mode
+            need_rgb = mode in ("rgb", "both")
+            need_dep = mode in ("depth", "both")
+            if need_rgb and self.rgb is None:
+                self.rgb = dv.G1Receiver(CFG["robot_pc2"], 55555) if real else dv.SimReceiver("127.0.0.1", 5555, "ego_view")
+                self.rgb.start()
+            if need_dep and self.dep is None:
+                host, port = (CFG["robot_pc2"], int(CFG["depth_port"])) if real else ("127.0.0.1", int(CFG["sim_depth_port"]))
+                self.dep = dc.DepthReceiver(host, port)
+                self.dep.start()
+            if not need_dep and self.dep is not None:
+                self._stop_rx(self.dep); self.dep = None
+            if mode == "off":
+                self._stop_rx(self.rgb); self.rgb = None
 
     def stop(self):
         with self.lock:
-            if self.rx is not None:
-                self.rx.stop = True
-            self.rx = None
+            self._stop_rx(self.rgb); self._stop_rx(self.dep)
+            self.rgb = self.dep = None
+            self.mode = "off"
+            self.dist = None
 
     def jpeg(self):
         import cv2
-        if self.rx is None:
+        import depth_cam as dc
+        if self.rgb is None and self.dep is None:
             return None
-        fr, ft = self.rx.latest()
-        if fr is None:
-            return None
-        bgr = cv2.cvtColor(fr, cv2.COLOR_RGB2BGR)
-        bgr = cv2.resize(bgr, (640, 480))
-        cv2.putText(bgr, "camara sin procesar (programa de cajas apagado)", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        return cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+        rgb = self.rgb.latest()[0] if self.rgb is not None else None
+        dep = self.dep.latest()[0] if self.dep is not None else None
+        img, dist = dc.compose(rgb, dep, "rgb" if self.mode == "off" else self.mode, near=0.2, far=float(CFG["depth_far"]))
+        self.dist = dist if self.dep is not None else None
+        cv2.putText(img, "vista del panel (sin deteccion)", (8, img.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                    (200, 200, 200), 1)
+        return cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 72])[1].tobytes()
 
-    def age(self):
-        if self.rx is None:
-            return None
-        return round(time.time() - self.rx.latest()[1], 1) if self.rx.latest()[0] is not None else None
+    def info(self):
+        def age(rx):
+            if rx is None:
+                return None
+            f, t = rx.latest()
+            return round(time.time() - t, 1) if f is not None else None
+        dist = None
+        if self.dep is not None:
+            import depth_cam as dc
+            d = self.dep.latest()[0]
+            dist = None if d is None else dc.center_distance_m(d)
+        return {"mode": self.mode, "rgb_age": age(self.rgb), "depth_age": age(self.dep),
+                "depth_center_m": None if dist is None else round(dist, 2)}
 
 
-RAW = RawCam()
+RAW = CamHub()
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +568,7 @@ def state_json(log=None, since=0):
     out = {
         "cfg": {k: v for k, v in CFG.items()}, "procs": [p.info() for p in PROCS.values()],
         "checks": CHECKS, "vision": vs, "phrases": list(PHRASES), "seq": SEQ,
-        "pw_set": bool(PASSWORD["v"]), "raw_age": RAW.age(), "vision_port": CFG["vision_port"],
+        "pw_set": bool(PASSWORD["v"]), "cam": RAW.info(), "vision_port": CFG["vision_port"],
     }
     if log in PROCS:
         P = PROCS[log]
@@ -611,6 +645,13 @@ class H(BaseHTTPRequestHandler):
             if act == "stop":
                 threading.Thread(target=PROCS[name].stop, daemon=True).start()
                 return self._json({"ok": True})
+            if act == "restart":
+                def _re():
+                    PROCS[name].stop()
+                    time.sleep(0.5)
+                    start_proc(name, real)
+                threading.Thread(target=_re, daemon=True).start()
+                return self._json({"ok": True})
             if act == "send":
                 return self._json({"ok": PROCS[name].send(str(body.get("text", "")), body.get("newline", True))})
         elif p == "/api/key":
@@ -637,11 +678,12 @@ class H(BaseHTTPRequestHandler):
             PROCS["vision"].flags["espera_si"] = False
             return self._json({"ok": ok})
         elif p == "/api/camview":
-            if body.get("on"):
-                RAW.ensure(real)
+            mode = body.get("mode") or ("rgb" if body.get("on") else "off")
+            if mode in ("rgb", "depth", "both"):
+                RAW.ensure(real, mode)
             else:
                 RAW.stop()
-            return self._json({"ok": True})
+            return self._json({"ok": True, "mode": RAW.mode})
         elif p == "/api/seq":
             if body.get("action") == "start" and not SEQ["running"]:
                 threading.Thread(target=run_start_all, args=(real,), daemon=True).start()

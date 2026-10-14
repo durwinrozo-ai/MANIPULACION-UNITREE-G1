@@ -1,9 +1,12 @@
 #!/bin/bash
-# Libera la RealSense de quien la tenga (videohub_pc4 u otros) y arranca teleimager
+# Libera la RealSense de quien la tenga (videohub_pc4 u otros) y arranca el servidor de camara.
+#   bash ~/start_camera.sh          -> teleimager-server --rs  (solo RGB, :55555)   [validado]
+#   bash ~/start_camera.sh rgbd     -> realsense_pub.py        (RGB :55555 + profundidad :55557)
+MODO=${1:-teleimager}
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 sudo -v || exit 1
 cd ~/teleimager
-grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"
+[ "$MODO" = "rgbd" ] || grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"
 
 liberar() {
   for p in $(sudo fuser /dev/video* 2>/dev/null); do
@@ -26,4 +29,8 @@ done
 ( for i in $(seq 1 100); do liberar; sleep 0.2; done ) >/dev/null 2>&1 &
 LOOP=$!
 trap 'kill $LOOP 2>/dev/null' EXIT
-teleimager-server --rs
+if [ "$MODO" = "rgbd" ]; then
+  python3 ~/realsense_pub.py
+else
+  teleimager-server --rs
+fi

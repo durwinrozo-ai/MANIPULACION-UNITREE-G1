@@ -39,6 +39,8 @@ input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid 
 .tl{list-style:none;margin:0;padding:0}.tl li{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)}.tl li:last-child{border:0}
 .tag{font-size:11px;border-radius:5px;padding:1px 6px;height:max-content;white-space:nowrap}.t-ok{background:rgba(60,207,122,.18);color:var(--ok)}.t-pend{background:rgba(242,184,75,.18);color:var(--warn)}
 .msg{margin-top:8px;color:var(--warn)}
+.hint{position:absolute;left:8px;right:8px;bottom:8px;background:rgba(0,0,0,.72);color:#ffd27a;border-radius:6px;padding:6px 9px;font-size:12px;display:none}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 </style></head><body>
 <header>
   <h1>🤖 Robot 3 cajas</h1>
@@ -52,10 +54,16 @@ input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid 
 <section>
   <div class="card">
     <h2>Lo que ve el robot</h2>
-    <div class="video"><img id="cam" alt=""><div class="none" id="camNone">Sin imagen.<br>Pulsa «Ver cámara» (solo ver) o arranca el programa de cajas.</div></div>
+    <div class="video" id="vid"><img id="cam" alt=""><div class="none" id="camNone">Sin imagen.<br>Elige una cámara abajo (RGB, profundidad o ambas) o arranca el programa de cajas.</div><div class="hint" id="camHint"></div></div>
     <div class="chips" id="chips"></div>
-    <div class="row" style="margin-top:8px"><button onclick="camview(true)">👁 Ver cámara</button><button onclick="camview(false)">Ocultar</button>
+    <div class="row" style="margin-top:8px"><b style="color:var(--mut)">Cámara:</b>
+      <button id="v_rgb" onclick="camview('rgb')">📷 RGB</button><button id="v_depth" onclick="camview('depth')">🌈 Profundidad</button><button id="v_both" onclick="camview('both')">⧉ RGB + profundidad</button><button id="v_off" onclick="camview('off')">Ocultar</button>
       <button onclick="util('calibrar')" title="abre la ventana de calibración HSV en tu PC">🎨 Calibrar colores</button></div>
+    <div class="row" style="margin-top:8px" id="srvRow"><b style="color:var(--mut)">Servidor de cámara del robot:</b>
+      <select id="camServer" onchange="camServer(this.value)"><option value="teleimager">teleimager · solo RGB (validado)</option><option value="rgbd">RealSense propio · RGB + profundidad (nuevo)</option></select>
+      <span style="color:var(--mut)" id="srvNote"></span></div>
+    <div class="row" style="margin-top:6px;display:none" id="simDepRow"><label class="row"><input type="checkbox" id="simDepth" onchange="simDepthCfg(this.checked)"> Simulador con profundidad (se aplica al reiniciar el simulador)</label></div>
+
   </div>
 
   <div class="card">
@@ -148,7 +156,11 @@ function key(k){post('/api/key',{k})}
 function emergencia(){post('/api/emergencia')}
 function voz(on){post('/api/voz',{on})}
 function seq(a){post('/api/seq',{action:a})}
-function camview(on){post('/api/camview',{on})}
+let camSelAt=0;
+function camview(mode){camSelAt=Date.now();post('/api/camview',{mode})}
+function camServer(v){post('/api/config',{cam_server:v}).then(()=>{const A=S&&S.procs.find(p=>p.name==='cam');
+  if(A&&A.alive){if(confirm('Reiniciar la cámara del robot (A) con el servidor elegido?\n(el programa de cajas perderá la imagen unos segundos)'))post('/api/proc',{name:'cam',action:'restart'})}})}
+function simDepthCfg(on){post('/api/config',{sim_depth:on})}
 function setPw(){post('/api/password',{pw:$('pw').value});$('pw').value=''}
 function sendTxt(){post('/api/proc',{name:logName,action:'send',text:$('sendtxt').value});$('sendtxt').value=''}
 function sendRaw(t){post('/api/proc',{name:logName,action:'send',text:t})}
@@ -157,7 +169,7 @@ function confirmarSI(){if(!$('okSafe').checked){alert('Marca primero la casilla 
 const FIELDS=[['robot_user','Usuario robot'],['robot_pc2','IP PC2 (cámara)'],['robot_pc1','IP PC1'],['pc_ip','IP de esta PC'],['iface','Interfaz de red'],
  ['gr00t','Carpeta GR00T'],['repo_dir','Carpeta del repo'],['hsv_file','Archivo HSV'],['mic_nombre','Nombre del micrófono'],['udp_puerto','Puerto UDP audio'],
  ['stop_y','stop-y (parada)'],['walk_speed','Velocidad de avance m/s'],['max_walk','Tope de velocidad real m/s (máx 0.8)'],['slow_y','y_max donde empieza a frenar'],['slow_speed','Velocidad de acercamiento m/s'],['scan_ang_vel','Giro rad/s'],['voz_activacion','Palabra de activación'],
- ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)']];
+ ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)'],['depth_far','Profundidad: alcance de la escala (m)'],['depth_port','Puerto de profundidad (robot)'],['sim_depth_port','Puerto de profundidad (simulador)']];
 function buildForm(){const f=$('form');f.innerHTML='';for(const [k,l] of FIELDS){const v=S.cfg[k];const lab=document.createElement('label');lab.textContent=l;
  let i;if(typeof v==='boolean'){i=document.createElement('input');i.type='checkbox';i.checked=v}else{i=document.createElement('input');i.value=v}
  i.id='f_'+k;lab.appendChild(i);f.appendChild(lab)}cfgBuilt=true}
@@ -178,12 +190,23 @@ function render(){
  pl+=pill('Voz '+(v?(v.voz_activa?(v.voz_enabled?'activa':'en pausa'):'apagada'):'—'),v&&v.voz_activa&&v.voz_enabled?'ok':'');
  $('pills').innerHTML=pl;
  // video
- let want='';if(v&&v.frame_age!=null&&v.frame_age<3)want=`http://127.0.0.1:${S.vision_port}/video.mjpg`;else if(S.raw_age!=null)want='/cam.mjpg';
+ const cm=S.cam.mode;let want='';
+ if(v&&v.frame_age!=null&&v.frame_age<3&&(cm==='off'||cm==='rgb'))want=`http://127.0.0.1:${S.vision_port}/video.mjpg`;
+ else if(cm!=='off')want='/cam.mjpg?m='+cm;
+ ['rgb','depth','both','off'].forEach(k=>{const e=$('v_'+k);if(e)e.className=(cm===k)?'on':''});
+ $('srvRow').style.display=modoReal()?'flex':'none';$('simDepRow').style.display=modoReal()?'none':'flex';
+ if(document.activeElement!==$('camServer'))$('camServer').value=S.cfg.cam_server;
+ $('simDepth').checked=!!S.cfg.sim_depth;$('srvNote').textContent=S.cfg.cam_server==='rgbd'?'profundidad en el puerto '+S.cfg.depth_port:'';
+ let hint='';if((cm==='depth'||cm==='both')&&S.cam.depth_age==null&&Date.now()-camSelAt>4000)
+  hint=modoReal()?'No llega profundidad. Elige «RealSense propio · RGB + profundidad», reinicia la cámara (A) y pulsa «Preparar robot (scp)» si es la primera vez.':'No llega profundidad. Activa «Simulador con profundidad» y reinicia el simulador (1).';
+ $('vid').style.aspectRatio=(cm==='both'&&want.indexOf('/cam.mjpg')===0)?'8/3':'4/3';
+ $('camHint').textContent=hint;$('camHint').style.display=hint?'block':'none';
  if(want!==camSrc){camSrc=want;$('cam').src=want||'';$('cam').style.display=want?'block':'none'}
  $('camNone').style.display=want?'none':'grid';
  // chips
  if(v){const f=x=>x==null?'—':x;$('chips').innerHTML=`<span class="chip">Objetivo <b>${v.target}</b></span><span class="chip">Estado <b>${v.label}</b></span><span class="chip">y_max <b>${f(v.y_max)}</b> / parada ${v.stop_y}</span><span class="chip">error <b>${f(v.err)}</b></span><span class="chip">vel <b>${v.speed}</b> m/s</span><span class="chip">${v.hz} Hz</span><span class="chip">${v.real?'REAL':'SIM'}${v.dry_run?' · DRY-RUN':''}${v.walking_test?' · PRUEBA MARCHA':''}</span>`;
   $('vozOn').checked=v.voz_enabled}else $('chips').innerHTML='<span class="chip">Programa de cajas apagado</span>';
+ if(S.cam.depth_center_m!=null)$('chips').innerHTML+=`<span class="chip">Profundidad al centro <b>${S.cam.depth_center_m} m</b></span>`;
  $('vozOn').disabled=!v;
  // seguridad
  const okS=$('okSafe').checked||!modoReal();$('safe').style.display=modoReal()?'block':'none';
