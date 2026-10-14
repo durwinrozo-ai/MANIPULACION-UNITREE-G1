@@ -126,25 +126,9 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
     <div class="row" style="margin-top:8px"><button onclick="saveCfg()">Guardar ajustes</button><span style="color:var(--mut)">Se aplican al lanzar el siguiente proceso.</span></div>
   </div>
 
-  <div class="card">
-    <h2>Lo realizado</h2>
-    <ul class="tl" id="tl"></ul>
-  </div>
 </section>
 </main>
 <script>
-const HITOS=[
- [1,"Programa de las 3 cajas en MuJoCo con el G1 de 29 GDL (SONIC): inspeccionar, ir al color y detenerse"],
- [1,"Cámara RealSense del robot publicada con teleimager (30 fps) y recibida en la PC"],
- [1,"Colores calibrados en HSV con el robot real (hsv_real.json)"],
- [1,"Distancia de parada unificada: y_max = 0.93 para rojo, verde y azul"],
- [1,"Script start_camera.sh v2 para liberar la cámara tras cada reinicio"],
- [1,"Control por voz con micrófono Insta360 (robot → UDP → PC), palabra de activación «zuu»"],
- [1,"Runbooks, informe semanal y repositorios de GitHub al día"],
- [1,"Panel de control web (esta pantalla)"],
- [0,"Confirmar que el robot camina (SLOW_WALK) con la tecla W en el robot real"],
- [0,"Llegar a la caja en el robot real y medir la distancia de parada con cinta"],
- [0,"Probar la voz integrada con el robot (precisión de «zuu», ruido de motores, latencia)"]];
 let S=null, logName='deploy', logSince=0, logBuf=[], camSrc='', cfgBuilt=false;
 const $=id=>document.getElementById(id);
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json()).catch(()=>({ok:false}));
@@ -233,6 +217,5 @@ async function poll(){
    const el=$('log'),stick=el.scrollTop+el.clientHeight>=el.scrollHeight-30;el.textContent=logBuf.join('\n');if(stick)el.scrollTop=el.scrollHeight}
   render()}catch(e){}
  setTimeout(poll,700)}
-$('tl').innerHTML=HITOS.map(h=>`<li><span class="tag ${h[0]?'t-ok':'t-pend'}">${h[0]?'hecho':'pendiente'}</span><span>${h[1]}</span></li>`).join('');
 poll();
 </script></body></html>

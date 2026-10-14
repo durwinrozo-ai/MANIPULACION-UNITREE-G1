@@ -277,6 +277,7 @@ class Navigator:
         self.arrived = False
         self.arrive_ticks = 0
         self.err_s = 0.0
+        self.turning = False
         self.last_seen = -1e9
         self.last_ymax = 0.0
 
@@ -332,7 +333,16 @@ class Navigator:
         rate = float(np.clip(-a.k_turn * self.err_s, -a.max_turn, a.max_turn))
         self.theta += rate * dt
 
-        if abs(self.err_s) < a.center_tol:
+        # histeresis: solo se detiene a girar en sitio si el objeto esta MUY desviado (turn_tol) y
+        # no reanuda la marcha hasta quedar bien centrado (center_tol). Con desvios pequenos camina
+        # sin parar corrigiendo el rumbo, para que la marcha sea continua (sin saltos IDLE<->SLOW_WALK).
+        e = abs(self.err_s)
+        if self.turning:
+            if e < a.center_tol:
+                self.turning = False
+        elif e > a.turn_tol:
+            self.turning = True
+        if not self.turning:
             return self._walk("avanzando", rate)
         return idle("centrando")
 
@@ -551,10 +561,11 @@ def main():
     p.add_argument("--stop-y", type=float, default=None,
                    help="y_max de llegada; 0.93 = ~0.85 m en el simulador. EN REAL hay que calibrarlo")
     p.add_argument("--arrive-ticks", type=int, default=5)
-    p.add_argument("--alpha-err", type=float, default=0.05)
-    p.add_argument("--k-turn", type=float, default=0.8)
+    p.add_argument("--alpha-err", type=float, default=0.2, help="suavizado del error (mas alto = menos retardo)")
+    p.add_argument("--k-turn", type=float, default=0.6)
     p.add_argument("--max-turn", type=float, default=0.6, help="rad/s")
-    p.add_argument("--center-tol", type=float, default=0.35)
+    p.add_argument("--center-tol", type=float, default=0.2, help="reanuda la marcha cuando |err| baja de esto")
+    p.add_argument("--turn-tol", type=float, default=0.65, help="solo gira en sitio (IDLE) si |err| supera esto")
     p.add_argument("--lost-hold", type=float, default=0.4, help="s siguiendo recto si se pierde el color")
     args = p.parse_args()
 
