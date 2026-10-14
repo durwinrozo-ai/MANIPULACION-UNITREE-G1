@@ -46,6 +46,7 @@ DEFAULT_CFG = {
     "usar_voz": True, "usar_mic": True, "dry_run": False,
     "vision_port": 8765, "modo": "real",
     "usar_pico": False, "pico_pc_ip": "192.168.123.104", "pico_modo": "ego", "pico_seguro": "habilitar", "pico_env": "tv",
+    "pico_puntero": "rayo", "pico_plano": "mundo", "pico_escala": 1.0, "pico_yaw": 0.0, "pico_pitch": 0.0,
     "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5567, "depth_far": 4.0,
 }
 
@@ -299,7 +300,9 @@ def start_proc(name, real=None):
                f"conda activate {sh_q(c['pico_env'])} && ")
         PICO.update(visor=False, gafas=False, ultimo="", t=0.0)
         a = [f"--panel http://127.0.0.1:{PORT_PANEL['v']}", f"--vision-port {c['vision_port']}",
-             f"--modo {c['pico_modo']}", f"--seguro {c['pico_seguro']}"]
+             f"--modo {c['pico_modo']}", f"--seguro {c['pico_seguro']}", f"--puntero {c['pico_puntero']}",
+             f"--plano {c['pico_plano']}", f"--puntero-escala {c['pico_escala']}",
+             f"--puntero-yaw {c['pico_yaw']}", f"--puntero-pitch {c['pico_pitch']}"]
         if PICO_FLAGS["probar"]:
             a.append("--probar")
         return P.start(act + f"python {sh_q(sd)}/pico_visor.py " + " ".join(a),

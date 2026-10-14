@@ -155,6 +155,30 @@ def mask_stats(mask, min_pixels, largest=False):
     return (True, float(err), float(ys.min() / h), float(ys.max() / h)), mask
 
 
+def all_boxes(img_rgb, mode, hsv_rules, min_pixels):
+    """Caja delimitadora (x0, y0, x1, y1, normalizada 0..1) de cada color visible, para elegirlas con el puntero
+    de los lentes Pico. Devuelve {"1": [...], "2": [...], "3": [...]} (rojo, verde, azul); solo los detectados."""
+    out = {}
+    h, w = img_rgb.shape[:2]
+    hsv = cv2.cvtColor(np.ascontiguousarray(img_rgb), cv2.COLOR_RGB2HSV) if mode == "hsv" else None
+    for t in (TARGET_RED, TARGET_GREEN, TARGET_BLUE):
+        mask = color_mask(img_rgb, t, mode, hsv_rules, hsv)
+        if int(mask.sum()) < min_pixels:
+            continue
+        if mode == "hsv":
+            n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+            if n <= 1:
+                continue
+            k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+            x, y, bw, bh = (int(stats[k, c]) for c in (cv2.CC_STAT_LEFT, cv2.CC_STAT_TOP, cv2.CC_STAT_WIDTH, cv2.CC_STAT_HEIGHT))
+            x1, y1 = x + bw, y + bh
+        else:
+            ys, xs = np.nonzero(mask)
+            x, y, x1, y1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+        out[str(t)] = [round(x / w, 4), round(y / h, 4), round(x1 / w, 4), round(y1 / h, 4)]
+    return out
+
+
 def detect_color(img_rgb, target, mode, hsv_rules, min_pixels, hsv=None):
     """Devuelve (det, mascara) con det = (detectado, err, y_min, y_max)."""
     mask = color_mask(img_rgb, target, mode, hsv_rules, hsv)
@@ -672,6 +696,7 @@ def main():
     last_b = 0.0
     prev_label = ""
     walk_until = 0.0  # tecla w: prueba de marcha recta sin vision
+    cajas, tick = {}, 0  # cajas detectadas (para el puntero de los lentes Pico)
     if args.dry_run:
         print("[DRY-RUN] el planner siempre recibe IDLE: el robot NO se mueve; se ve la logica en pantalla.")
 
@@ -711,8 +736,20 @@ def main():
                 pub.send(build_planner(mode, mv, fc, sp))
 
             k = ""
+            tick += 1
+            if bridge is not None and frame is not None and tick % 3 == 0:
+                try:
+                    cajas = all_boxes(frame, args.color_mode, hsv_rules, args.min_pixels)
+                except Exception:  # noqa: BLE001
+                    cajas = {}
+            elif frame is None:
+                cajas = {}
             if frame is not None:
                 view = draw_overlay(frame, nav, det, label, hz, mask, real)
+                if bridge is not None:
+                    for tk, (bx0, by0, bx1, by1) in cajas.items():
+                        col = {"1": (60, 60, 255), "2": (60, 200, 60), "3": (255, 120, 40)}[tk]
+                        cv2.rectangle(view, (int(bx0 * 640), int(by0 * 480)), (int(bx1 * 640), int(by1 * 480)), col, 1)
             else:
                 view = np.zeros((480, 640, 3), np.uint8)
                 cv2.putText(view, "esperando imagen...", (30, 240),
@@ -749,6 +786,7 @@ def main():
                     "err": None if det is None or not det[0] else round(float(det[1]), 3),
                     "stop_y": args.stop_y, "walk_speed": args.walk_speed, "real": bool(real),
                     "dry_run": bool(args.dry_run), "walking_test": bool(t0 < walk_until),
+                    "cajas": cajas,
                     "voz": args.voz, "voz_enabled": bridge.voz_enabled,
                     "voz_activa": voz is not None, "frame_age": None if frame is None else round(t0 - ft, 2),
                     "t": round(t0, 2)}

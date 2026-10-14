@@ -106,6 +106,8 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
     <div class="row" style="margin-top:8px">
       <label class="row">Vista <select id="pk_modo" onchange="post('/api/config',{pico_modo:this.value})"><option value="ego">ego · ventana con el entorno real</option><option value="immersive">inmersiva · todo el campo visual</option></select></label>
       <label class="row">Seguro <select id="pk_seg" onchange="post('/api/config',{pico_seguro:this.value})"><option value="habilitar">habilitar · grip al dar el destino</option><option value="mantener">mantener · grip todo el trayecto</option><option value="off">sin grip (no recomendado)</option></select></label>
+      <label class="row">Puntero <select id="pk_ptr" onchange="post('/api/config',{pico_puntero:this.value})"><option value="rayo">rayo del mando derecho</option><option value="joystick">cursor con joystick izq.</option><option value="off">sin puntero</option></select></label>
+      <label class="row">Plano del video <select id="pk_plano" onchange="post('/api/config',{pico_plano:this.value})"><option value="mundo">fijo en el espacio</option><option value="head">pegado a las gafas</option></select></label>
       <label class="row"><input type="checkbox" id="pk_auto" onchange="post('/api/config',{usar_pico:this.checked})"> Incluir en «Arrancar todo»</label>
     </div>
     <p style="margin:8px 0 2px;color:var(--mut)">En las gafas (navegador del Pico, barra de direcciones): <b id="pk_url" style="user-select:all"></b>
@@ -114,8 +116,10 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
     <table class="mini"><tr><th>Mando</th><th>Orden</th><th>Mando</th><th>Orden</th></tr>
       <tr><td><b>A</b> (der.)</td><td>🟥 Rojo</td><td><b>X</b> (izq.)</td><td>🟦 Azul</td></tr>
       <tr><td><b>B</b> (der.)</td><td>🟩 Verde</td><td><b>Y</b> (izq.) mantener</td><td>🚶 Avanzar recto (al soltar: PARAR)</td></tr>
-      <tr><td>Gatillo der.</td><td>🔄 Inspeccionar</td><td>Gatillo izq.</td><td><b>PARAR</b> (siempre)</td></tr>
-      <tr><td>Clic joystick</td><td>⏸ Quieto</td><td>Grip (lateral)</td><td>Seguro: habilita las órdenes de movimiento</td></tr></table>
+      <tr><td><b>Gatillo der.</b></td><td>🎯 Elegir la caja a la que apuntas</td><td>Gatillo izq.</td><td><b>PARAR</b> (siempre)</td></tr>
+      <tr><td>Clic joystick der.</td><td>🔄 Inspeccionar</td><td>Clic joystick izq.</td><td>⏸ Quieto</td></tr>
+      <tr><td>Los 2 clics a la vez</td><td>Calibrar el puntero (apuntando a la cruz del centro)</td><td>Grip (lateral)</td><td>Seguro: habilita las órdenes de movimiento</td></tr></table>
+    <p style="margin:6px 0 0;color:var(--mut)"><b>Puntero:</b> en las gafas cada caja detectada tiene un recuadro; apunta con el mando derecho (o mueve el cursor con el joystick izquierdo), la caja se resalta y el <b>gatillo derecho</b> manda al robot hacia ella. Con «rayo», primero calibra: apunta a la cruz del centro y aprieta los dos joysticks a la vez.</p>
     <p style="margin:6px 0 0;color:var(--mut)">Lo que ven las gafas es lo mismo que el panel (programa de cajas o la cámara elegida arriba). La parada de emergencia real sigue siendo el mando Unitree o la tecla <b>O</b>.</p>
   </div>
 </section>
@@ -178,7 +182,7 @@ function confirmarSI(){if(!$('okSafe').checked){alert('Marca primero la casilla 
 const FIELDS=[['robot_user','Usuario robot'],['robot_pc2','IP PC2 (cámara)'],['robot_pc1','IP PC1'],['pc_ip','IP de esta PC'],['iface','Interfaz de red'],
  ['gr00t','Carpeta GR00T'],['repo_dir','Carpeta del repo'],['hsv_file','Archivo HSV'],['mic_nombre','Nombre del micrófono'],['udp_puerto','Puerto UDP audio'],
  ['stop_y','stop-y (parada)'],['walk_speed','Velocidad de avance m/s'],['max_walk','Tope de velocidad real m/s (máx 0.8)'],['slow_y','y_max donde empieza a frenar'],['slow_speed','Velocidad de acercamiento m/s'],['scan_ang_vel','Giro rad/s'],['voz_activacion','Palabra de activación'],
- ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)'],['pico_pc_ip','Pico: IP de esta PC en la red del visor'],['pico_env','Pico: entorno conda'],['depth_far','Profundidad: alcance de la escala (m)'],['depth_port','Puerto de profundidad (robot)'],['sim_depth_port','Puerto de profundidad (simulador)']];
+ ['voz_umbral','Umbral de voz'],['voz_idioma','Idioma voz'],['usar_voz','Programa de cajas con voz (bool)'],['usar_mic','Arranque incluye micrófono (bool)'],['dry_run','Dry-run: no mueve al robot (bool)'],['pico_pc_ip','Pico: IP de esta PC en la red del visor'],['pico_escala','Pico: tamaño del plano del video (puntero)'],['pico_yaw','Pico: ajuste fino del rayo, yaw (°)'],['pico_pitch','Pico: ajuste fino del rayo, pitch (°)'],['pico_env','Pico: entorno conda'],['depth_far','Profundidad: alcance de la escala (m)'],['depth_port','Puerto de profundidad (robot)'],['sim_depth_port','Puerto de profundidad (simulador)']];
 function buildForm(){const f=$('form');f.innerHTML='';for(const [k,l] of FIELDS){const v=S.cfg[k];const lab=document.createElement('label');lab.textContent=l;
  let i;if(typeof v==='boolean'){i=document.createElement('input');i.type='checkbox';i.checked=v}else{i=document.createElement('input');i.value=v}
  i.id='f_'+k;lab.appendChild(i);f.appendChild(lab)}cfgBuilt=true}
@@ -226,11 +230,13 @@ function render(){
   $('pk_on').disabled=pp.alive;$('pk_off').disabled=!pp.alive;
   if(document.activeElement!==$('pk_modo'))$('pk_modo').value=S.cfg.pico_modo;
   if(document.activeElement!==$('pk_seg'))$('pk_seg').value=S.cfg.pico_seguro;
+  if(document.activeElement!==$('pk_ptr'))$('pk_ptr').value=S.cfg.pico_puntero;if(document.activeElement!==$('pk_plano'))$('pk_plano').value=S.cfg.pico_plano;
   $('pk_auto').checked=!!S.cfg.usar_pico;$('pk_url').textContent=k.url_vuer||'';$('pk_url2').textContent=k.url_local||'';
   let q=pill('Visor '+(pp.alive?(k.activo?'activo':pp.state):'apagado'),pp.alive&&k.activo?'ok':pp.alive?'warn':'');
   if(k.activo){q+=pill('Gafas '+(k.gafas?'conectadas':'sin conectar'),k.gafas?'ok':'warn');
    q+=pill('Video '+(k.video_ok?(k.fuente==='programa'?'del programa':'cámara cruda'):'sin imagen'),k.video_ok?'ok':'err');
    q+=pill('Seguro '+(k.seguro_on?'ON':'OFF')+' ('+k.seguro+')',k.seguro_on?'ok':'');
+   if(k.puntero&&k.puntero.modo!=='off')q+=pill('Puntero '+(k.puntero.calibrado?'calibrado':'SIN CALIBRAR')+(k.puntero.sobre?' · sobre '+k.puntero.sobre:'')+' · cajas: '+((k.puntero.cajas||[]).length),k.puntero.calibrado?'ok':'warn');
    if(k.probar)q+=pill('PRUEBA: no manda órdenes','warn');
    if(k.botones&&k.botones.length)q+=pill('Botones: '+k.botones.join(' '),'ok');
    if(k.ultimo)q+=pill('Último: '+k.ultimo,'ok');if(k.bloqueo)q+=pill(k.bloqueo,'err')}

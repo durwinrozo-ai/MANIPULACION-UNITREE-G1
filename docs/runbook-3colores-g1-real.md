@@ -476,10 +476,18 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | **B** (derecho) | Verde |
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (repite `w`; al soltar: PARAR) |
-| Gatillo derecho | Inspeccionar |
+| **Gatillo derecho** | **Elegir la caja a la que apuntas con el puntero** |
+| Clic del joystick derecho | Inspeccionar |
+| Clic del joystick izquierdo | Quieto |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
-| Clic de un joystick | Quieto |
+| Los dos clics a la vez | Calibrar el puntero |
 | Grip (lateral) | Seguro |
+
+**Puntero para elegir la caja.** En las gafas, cada caja que el programa de cajas detecta lleva un recuadro fino (rojo, verde o azul). Apuntas con el mando derecho (un cursor amarillo muestra dónde cae el rayo), la caja apuntada se resalta con un recuadro grueso y su nombre, y el **gatillo derecho** manda al robot hacia ella, igual que pulsar su color. Pide el mismo seguro (grip) que las demás órdenes de movimiento. Solo funciona con el programa de cajas encendido (es quien detecta las cajas).
+
+1. **Calibrar (cada vez que entras a las gafas):** apunta a la cruz amarilla del centro del video y aprieta los dos joysticks a la vez. El cursor aparece y el estado dice «puntero calibrado».
+2. Apunta a una caja: se resalta. Aprieta el gatillo derecho: el robot va hacia ella y se detiene en `y_max = 0.93`.
+3. Si el cursor no cae donde apuntas: «Plano del video» (fijo en el espacio / pegado a las gafas), «Pico: tamaño del plano del video» y el ajuste fino yaw/pitch están en Ajustes. Alternativa que no depende de la pose del mando: Puntero = **cursor con joystick izquierdo** (lo mueves con el joystick y eliges con el gatillo derecho).
 
 **Seguro (se elige en el panel):** *habilitar* (por defecto): para dar un destino hay que tener un grip apretado en ese momento; *mantener*: además, si sueltas los dos grips el robot recibe PARAR; *sin grip*: no recomendado con el robot real. La barra inferior de las gafas muestra la leyenda de los botones, el estado del seguro y la última orden. La parada de emergencia real sigue siendo el mando Unitree o la tecla `O`.
 
@@ -491,9 +499,11 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | Puerto 8012 en uso | Otra copia del visor o `test_pico_local.py` abierto: ciérralo |
 | «Gafas sin conectar» | Abre la URL en el Pico y pulsa Virtual Reality; revisa la IP (Ajustes) y el certificado |
 | Órdenes bloqueadas «mantén un grip apretado» | Aprieta un grip al pulsar (modo habilitar/mantener) |
+| El gatillo dice «Apunta a una caja» o «Calibra el puntero» | Calibra (cruz del centro + 2 joysticks) y apunta dentro del recuadro de una caja; el programa de cajas debe estar encendido |
+| El cursor no sigue al mando / se desvía | Cambia «Plano del video», ajusta el tamaño o el yaw/pitch; o usa el puntero con joystick |
 | Las gafas dicen «Sin imagen del robot» | Inicia el programa de cajas o una cámara (RGB / Profundidad) en el panel |
 
-**Estado:** probado con gafas simuladas (mapeo de botones, envío de teclas al panel, estados en el panel, cierre ordenado). **Falta probar con el Pico real:** nombres de botones, posición del plano de imagen, latencia y el visor completo con `televuer`.
+**Estado:** probado con gafas simuladas (mapeo de botones, envío de teclas al panel, estados en el panel, cierre ordenado). **Falta probar con el Pico real:** nombres de botones, posición del plano de imagen y precisión del puntero (la geometría es una suposición que se ajusta con la calibración y los ajustes del puntero; con gafas simuladas se verificó que el gatillo elige la caja correcta y bloquea sin grip, sin calibrar o sin caja), latencia y el visor completo con `televuer`.
 
 ## Cierre de una prueba (detener todo)
 

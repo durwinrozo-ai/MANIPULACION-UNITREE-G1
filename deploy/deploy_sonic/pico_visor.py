@@ -19,10 +19,19 @@ MANDOS (controladores Pico). Mandan las MISMAS teclas que el panel (POST /api/ke
     B (derecho)            VERDE       (2)
     X (izquierdo)          AZUL        (3)
     Y (izquierdo)          AVANZAR     (w, recto; mientras se mantiene pulsado; al soltar: PARAR)
-    Gatillo derecho        INSPECCIONAR (s)
+    Gatillo derecho        SELECCIONAR la caja a la que apunta el PUNTERO (ver abajo)
+    Clic joystick derecho  INSPECCIONAR (s)
+    Clic joystick izq.     QUIETO      (0)
     Gatillo izquierdo      PARAR       (ESPACIO, siempre funciona)
-    Clic de un joystick    QUIETO      (0)
+    Ambos clics a la vez   CALIBRAR el puntero (apuntando a la cruz del centro del video)
     Grip (lateral)         SEGURO: ver --seguro
+
+PUNTERO (--puntero rayo|joystick|off). En las gafas se ve el video del robot con un recuadro fino alrededor
+de cada caja detectada (rojo/verde/azul). Se apunta con el mando derecho (rayo) o se mueve el cursor con el
+joystick izquierdo (--puntero joystick, alternativa que no depende de la pose del mando). La caja bajo el
+cursor se resalta; el GATILLO DERECHO la elige y el robot va hacia ella (igual que pulsar su color).
+Rayo: antes de usarlo, apuntar a la cruz del centro y apretar los dos joysticks a la vez (CALIBRAR);
+--plano mundo|head dice si el plano del video esta fijo en el espacio (defecto) o pegado a la cabeza.
 
 SEGURIDAD (--seguro):
     habilitar (defecto)  para dar un destino hay que tener un grip apretado en ese momento
@@ -45,7 +54,7 @@ import cv2
 import numpy as np
 
 CHIPS = [("A", "ROJO", (60, 60, 230)), ("B", "VERDE", (80, 180, 80)), ("X", "AZUL", (230, 120, 50)),
-         ("Y", "AVANZAR", (40, 190, 230)), ("GAT.D", "INSPECC.", (200, 160, 60)),
+         ("Y", "AVANZAR", (40, 190, 230)), ("GAT.D", "ELEGIR", (200, 160, 60)),
          ("GAT.I", "PARAR", (60, 60, 200))]
 
 
@@ -56,23 +65,29 @@ class Mapper:
     """Convierte el estado de los mandos en teclas del programa de cajas.
 
     s: dict con rA, rB, lX, lY, rTrig, lTrig, rStick, lStick, gripL, gripR (bool).
+    punto: caja bajo el puntero (1/2/3) o None; cal: el puntero esta calibrado (o no hace falta).
     update() devuelve una lista de (tecla, etiqueta). Actua por flanco de subida.
+    La tecla especial "CAL" pide calibrar el puntero (no se envia al panel).
     """
-    KEYS = (("rA", "1", "ROJO"), ("rB", "2", "VERDE"), ("lX", "3", "AZUL"), ("rTrig", "s", "INSPECCIONAR"))
+    KEYS = (("rA", "1", "ROJO"), ("rB", "2", "VERDE"), ("lX", "3", "AZUL"))
+    NOMBRES = {1: "ROJO", 2: "VERDE", 3: "AZUL"}
+    VENTANA = 0.30  # s: los dos clics de joystick deben llegar dentro de esta ventana para calibrar
 
-    def __init__(self, seguro="habilitar", avanzar_cada=1.0):
+    def __init__(self, seguro="habilitar", avanzar_cada=1.0, puntero=True):
         self.seguro = seguro
         self.cada = avanzar_cada
+        self.puntero = puntero
         self.prev = {}
         self.last_w = -1e9
         self.avanzando = False
         self.activo = False  # hay un destino en marcha pedido desde los mandos
         self.bloqueo = ""
+        self.pend = {}  # clic de joystick esperando a ver si llega el otro (calibracion)
 
     def seguro_ok(self, s):
         return self.seguro == "off" or bool(s.get("gripL") or s.get("gripR"))
 
-    def update(self, s, now):
+    def update(self, s, now, punto=None, cal=True):
         out = []
         self.bloqueo = ""
 
@@ -84,20 +99,49 @@ class Mapper:
             out.append((" ", "PARAR"))
             self.avanzando = False
             self.activo = False
-        for k in ("rStick", "lStick"):
+        # clics de joystick: solos = Inspeccionar / Quieto; los dos juntos = calibrar el puntero
+        cal_pedida = False
+        for k, key, label in (("rStick", "s", "INSPECCIONAR"), ("lStick", "0", "QUIETO")):
             if up(k):
-                out.append(("0", "QUIETO"))
+                otro = "lStick" if k == "rStick" else "rStick"
+                if otro in self.pend or s.get(otro):
+                    self.pend.clear()
+                    if not cal_pedida:
+                        out.append(("CAL", "CALIBRAR puntero"))
+                        cal_pedida = True
+                else:
+                    self.pend[k] = (now, key, label)
+        for k, (t, key, label) in list(self.pend.items()):
+            if now - t >= self.VENTANA:
+                del self.pend[k]
+                if key == "s" and not ok:
+                    self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
+                    continue
+                out.append((key, label))
                 self.avanzando = False
                 self.activo = False
         for name, key, label in self.KEYS:
             if up(name):
                 if ok:
                     out.append((key, label))
-                    self.activo = key in "123"
-                    if key == "s":
-                        self.activo = False
+                    self.activo = True
                 else:
                     self.bloqueo = f"{label}: mantén un grip apretado"
+        if up("rTrig"):
+            if not self.puntero:  # sin puntero: el gatillo derecho inspecciona
+                if ok:
+                    out.append(("s", "INSPECCIONAR"))
+                else:
+                    self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
+            elif not cal:
+                self.bloqueo = "Calibra el puntero: apunta a la cruz y aprieta los 2 joysticks"
+            elif punto not in (1, 2, 3):
+                self.bloqueo = "Apunta a una caja y aprieta el gatillo"
+            elif ok:
+                out.append((str(punto), f"{self.NOMBRES[punto]} (puntero)"))
+                self.activo = True
+            else:
+                self.bloqueo = f"{self.NOMBRES[punto]}: mantén un grip apretado"
         # AVANZAR: mientras Y esta pulsado se repite 'w'; al soltar, PARAR
         if s.get("lY"):
             if ok:
@@ -119,6 +163,123 @@ class Mapper:
         return out
 
 
+# ----------------------------------------------------------------------------
+# Puntero: rayo del mando -> pixel del video (geometria pura, se prueba sin gafas)
+# ----------------------------------------------------------------------------
+class Puntero:
+    """Intersecta el rayo del mando con el plano donde las gafas dibujan el video.
+
+    TeleVuer dibuja el video en un plano de alto `Hp` a `D` m (ego: 0.75 m a 2 m; inmersivo: 1 m a 1 m),
+    aspecto ancho/alto de la imagen. Se asume que el plano mira al usuario y que su centro esta en
+    (cx, cy, -D): `plano='mundo'` en el sistema de coordenadas del visor (fijo en el espacio) o
+    `plano='head'` en el sistema de la cabeza (pegado a las gafas). El centro (cx, cy) se calibra
+    apuntando al centro del video (calibrar()). El rayo sale del mando hacia su eje -z.
+    """
+
+    def __init__(self, plano="mundo", vista="ego", ancho=960, alto=540, escala=1.0, yaw=0.0, pitch=0.0):
+        self.D, self.Hp = (2.0, 0.75) if vista == "ego" else (1.0, 1.0)
+        self.Hp *= escala
+        self.W = self.Hp * ancho / alto
+        self.w, self.h = ancho, alto
+        self.plano = plano
+        self.cx = self.cy = None
+        self.yaw, self.pitch = np.radians(yaw), np.radians(pitch)
+
+    @property
+    def calibrado(self):
+        return self.cx is not None
+
+    def _ray(self, H, M):
+        o = np.array(M[:3, 3], float)
+        d = -np.array(M[:3, 2], float)
+        if self.yaw or self.pitch:  # ajuste fino del eje del mando
+            cy_, sy_, cp, sp = np.cos(self.yaw), np.sin(self.yaw), np.cos(self.pitch), np.sin(self.pitch)
+            R = np.array([[cy_, 0, sy_], [0, 1, 0], [-sy_, 0, cy_]]) @ np.array([[1, 0, 0], [0, cp, -sp], [0, sp, cp]])
+            d = np.array(M[:3, :3], float) @ R @ np.array([0, 0, -1.0])
+        if self.plano == "head":
+            Hh = np.array(H, float)
+            o = np.linalg.inv(Hh) @ np.append(o, 1.0)
+            o = o[:3]
+            d = Hh[:3, :3].T @ d
+        return o, d
+
+    def _hit(self, H, M):
+        o, d = self._ray(H, M)
+        if d[2] > -1e-6:
+            return None
+        t = (-self.D - o[2]) / d[2]
+        if t <= 0:
+            return None
+        p = o + t * d
+        return float(p[0]), float(p[1])
+
+    def calibrar(self, H, M):
+        h = self._hit(H, M)
+        if h is None:
+            return False
+        self.cx, self.cy = h
+        return True
+
+    def pixel(self, H, M):
+        """(u, v) en el cuadro de 960x540 que se entrega a TeleVuer, o None si no apunta al plano."""
+        h = self._hit(H, M)
+        if h is None or not self.calibrado:
+            return None
+        return ((h[0] - self.cx) / self.W + 0.5) * self.w, (0.5 - (h[1] - self.cy) / self.Hp) * self.h
+
+
+class CursorJoystick:
+    """Alternativa al rayo: el joystick izquierdo mueve un cursor sobre el video."""
+
+    def __init__(self, ancho=960, alto=540, vel=0.55):
+        self.w, self.h, self.vel = ancho, alto, vel
+        self.u, self.v = ancho / 2.0, alto / 2.0
+        self.t = None
+
+    calibrado = True
+
+    def update(self, stick, now):
+        dt = 0.0 if self.t is None else min(0.1, now - self.t)
+        self.t = now
+        x, y = float(stick[0]), float(stick[1])
+        if abs(x) < 0.12:
+            x = 0.0
+        if abs(y) < 0.12:
+            y = 0.0
+        self.u = float(np.clip(self.u + x * self.vel * self.w * dt, 0, self.w))
+        self.v = float(np.clip(self.v + y * self.vel * self.h * dt, 0, self.h))  # y>0 = hacia abajo (eje WebXR)
+        return self.u, self.v
+
+    def pixel(self, *a):
+        return self.u, self.v
+
+
+def letterbox_rect(ih, iw, h, w):
+    """Rectangulo (x0, y0, nw, nh) que ocupa un video de ih x iw dentro del cuadro h x w (ver letterbox())."""
+    s = min(h / ih, w / iw)
+    nh, nw = max(1, int(ih * s)), max(1, int(iw * s))
+    return (w - nw) // 2, (h - nh) // 2, nw, nh
+
+
+def caja_bajo(cajas, uv, src_hw, h, w, margen=0.03):
+    """Caja (1/2/3) bajo el pixel `uv` del cuadro h x w. `cajas`: {"1": [x0,y0,x1,y1]} normalizadas al video.
+    Devuelve (id, (x0,y0,x1,y1) en pixeles del cuadro) o (None, None). Con varias, la de menor area."""
+    if uv is None or not cajas or src_hw is None:
+        return None, None
+    x0, y0, nw, nh = letterbox_rect(src_hw[0], src_hw[1], h, w)
+    nx, ny = (uv[0] - x0) / nw, (uv[1] - y0) / nh
+    mejor, area = None, 1e9
+    for k, (bx0, by0, bx1, by1) in cajas.items():
+        if bx0 - margen <= nx <= bx1 + margen and by0 - margen <= ny <= by1 + margen:
+            a = (bx1 - bx0) * (by1 - by0)
+            if a < area:
+                mejor, area = k, a
+    if mejor is None:
+        return None, None
+    bx0, by0, bx1, by1 = cajas[mejor]
+    return int(mejor), (int(x0 + bx0 * nw), int(y0 + by0 * nh), int(x0 + bx1 * nw), int(y0 + by1 * nh))
+
+
 def read_state(tv):
     g = lambda n, d=False: getattr(tv, n, d)  # noqa: E731
     return {"rA": bool(g("right_ctrl_aButton")), "rB": bool(g("right_ctrl_bButton")),
@@ -126,6 +287,19 @@ def read_state(tv):
             "rTrig": bool(g("right_ctrl_trigger")), "lTrig": bool(g("left_ctrl_trigger")),
             "rStick": bool(g("right_ctrl_thumbstick")), "lStick": bool(g("left_ctrl_thumbstick")),
             "gripL": bool(g("left_ctrl_squeeze")), "gripR": bool(g("right_ctrl_squeeze"))}
+
+
+def read_poses(tv, mano):
+    """(cabeza 4x4, mando 4x4) o (None, None)."""
+    try:
+        H = np.array(tv.head_pose, float).reshape(4, 4)
+        M = np.array(tv.right_arm_pose if mano == "derecha" else tv.left_arm_pose, float).reshape(4, 4)
+        if not np.isfinite(H).all() or not np.isfinite(M).all() or abs(np.linalg.det(M[:3, :3])) < 1e-6 \
+                or abs(np.linalg.det(H[:3, :3])) < 1e-6:
+            return None, None
+        return H, M
+    except Exception:  # noqa: BLE001
+        return None, None
 
 
 # ----------------------------------------------------------------------------
@@ -189,9 +363,11 @@ def letterbox(img, h, w):
     return out
 
 
-def compose(frame, age, h, w, seguro_txt, ultimo, bloqueo, seguro_on, src):
-    """Imagen final para las gafas: video + barra con la leyenda de los mandos."""
-    if frame is None or age > 2.5:
+def compose(frame, age, h, w, seguro_txt, ultimo, bloqueo, seguro_on, src, cajas=None, uv=None, sel=None, cal=True,
+            puntero_txt=""):
+    """Imagen final para las gafas: video + recuadros de las cajas + cursor + barra con la leyenda de los mandos."""
+    ok_img = frame is not None and age <= 2.5
+    if not ok_img:
         img = np.full((h, w, 3), 30, np.uint8)
         cv2.putText(img, "Sin imagen del robot", (w // 2 - 190, h // 2 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0,
                     (255, 255, 255), 2, cv2.LINE_AA)
@@ -199,6 +375,32 @@ def compose(frame, age, h, w, seguro_txt, ultimo, bloqueo, seguro_on, src):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1, cv2.LINE_AA)
     else:
         img = letterbox(frame, h, w)
+        # cajas seleccionables (el programa de cajas las detecta): recuadro fino; la apuntada, gruesa
+        if cajas:
+            x0, y0, nw, nh = letterbox_rect(frame.shape[0], frame.shape[1], h, w)
+            cols = {"1": (60, 60, 255), "2": (60, 220, 60), "3": (255, 140, 50)}
+            for k, (bx0, by0, bx1, by1) in cajas.items():
+                p0 = (int(x0 + bx0 * nw), int(y0 + by0 * nh))
+                p1 = (int(x0 + bx1 * nw), int(y0 + by1 * nh))
+                es_sel = sel is not None and int(k) == sel[0]
+                cv2.rectangle(img, p0, p1, cols[k], 4 if es_sel else 1)
+                if es_sel:
+                    cv2.putText(img, {"1": "ROJO", "2": "VERDE", "3": "AZUL"}[k] + " - gatillo derecho para ir",
+                                (p0[0], max(18, p0[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cols[k], 2, cv2.LINE_AA)
+    # cursor del puntero
+    if uv is not None and ok_img:
+        u, v = int(uv[0]), int(uv[1])
+        if 0 <= u < w and 0 <= v < h - 64:
+            col = (0, 255, 255)
+            cv2.circle(img, (u, v), 12, col, 2, cv2.LINE_AA)
+            cv2.line(img, (u - 20, v), (u + 20, v), col, 1, cv2.LINE_AA)
+            cv2.line(img, (u, v - 20), (u, v + 20), col, 1, cv2.LINE_AA)
+    if not cal and ok_img:  # cruz de calibracion en el centro
+        cx, cy = w // 2, (h - 64) // 2
+        cv2.line(img, (cx - 30, cy), (cx + 30, cy), (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.line(img, (cx, cy - 30), (cx, cy + 30), (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(img, "CALIBRAR: apunta a la cruz y aprieta los 2 joysticks", (cx - 270, cy + 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
     bar = 64
     ov = img.copy()
     cv2.rectangle(ov, (0, h - bar), (w, h), (20, 20, 20), -1)
@@ -211,13 +413,35 @@ def compose(frame, age, h, w, seguro_txt, ultimo, bloqueo, seguro_on, src):
         cv2.putText(img, txt, (x + 6, h - bar + 23), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         x += tw + 20
     col = (80, 200, 80) if seguro_on else (60, 60, 230)
-    cv2.putText(img, f"SEGURO {'ON' if seguro_on else 'OFF'} ({seguro_txt})", (8, h - 12), cv2.FONT_HERSHEY_SIMPLEX,
-                0.55, col, 1, cv2.LINE_AA)
+    cv2.putText(img, f"SEGURO {'ON' if seguro_on else 'OFF'} ({seguro_txt})  {puntero_txt}", (8, h - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, col, 1, cv2.LINE_AA)
     msg = bloqueo or (f"ultimo: {ultimo}" if ultimo else "")
     if msg:
         cv2.putText(img, msg, (w - 8 - cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)[0][0], h - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (60, 60, 230) if bloqueo else (255, 255, 255), 1, cv2.LINE_AA)
     return img
+
+
+class StatusPoller(threading.Thread):
+    """Lee /status del programa de cajas (cajas detectadas para el puntero)."""
+
+    def __init__(self, url):
+        super().__init__(daemon=True)
+        self.url = url
+        self.cajas = {}
+        self.t = 0.0
+        self.stop = False
+
+    def run(self):
+        while not self.stop:
+            try:
+                with urllib.request.urlopen(self.url, timeout=0.6) as r:
+                    d = json.loads(r.read() or b"{}")
+                self.cajas = {k: v for k, v in (d.get("cajas") or {}).items() if k in ("1", "2", "3")}
+                self.t = time.time()
+            except Exception:  # noqa: BLE001
+                self.cajas = {}
+            time.sleep(0.1)
 
 
 # ----------------------------------------------------------------------------
@@ -268,6 +492,14 @@ def main():
     ap.add_argument("--avanzar-cada", type=float, default=1.0, help="s entre 'w' mientras se mantiene Y")
     ap.add_argument("--cert", default=None)
     ap.add_argument("--key", default=None)
+    ap.add_argument("--puntero", choices=["rayo", "joystick", "off"], default="rayo",
+                    help="elegir la caja apuntando: rayo del mando derecho, o cursor movido con el joystick izquierdo")
+    ap.add_argument("--plano", choices=["mundo", "head"], default="mundo",
+                    help="el plano del video esta fijo en el espacio (mundo) o pegado a las gafas (head)")
+    ap.add_argument("--puntero-escala", type=float, default=1.0, help="ajusta el tamaño del plano del video si el cursor no llega a los bordes")
+    ap.add_argument("--puntero-yaw", type=float, default=0.0, help="grados: ajuste fino del eje del rayo")
+    ap.add_argument("--puntero-pitch", type=float, default=0.0)
+    ap.add_argument("--mano", choices=["derecha", "izquierda"], default="derecha", help="mando que apunta (rayo)")
     ap.add_argument("--probar", action="store_true", help="no manda nada al robot: solo muestra los botones")
     ap.add_argument("--sin-video", action="store_true", help="solo mandos (no entrega imagen a las gafas)")
     args = ap.parse_args()
@@ -291,12 +523,21 @@ def main():
     src = MjpegSource(urls)
     src.start()
     link = PanelLink(args.panel, dry=args.probar)
-    mp = Mapper(args.seguro, args.avanzar_cada)
+    mp = Mapper(args.seguro, args.avanzar_cada, puntero=args.puntero != "off")
+    sp = StatusPoller(f"http://127.0.0.1:{args.vision_port}/status")
+    sp.start()
+    if args.puntero == "rayo":
+        ptr = Puntero(args.plano, args.modo, args.ancho, args.alto, args.puntero_escala, args.puntero_yaw, args.puntero_pitch)
+    elif args.puntero == "joystick":
+        ptr = CursorJoystick(args.ancho, args.alto)
+    else:
+        ptr = None
     print(f"[Pico] visor web listo en https://<IP de esta PC>:8012  (modo {args.modo}, seguro={args.seguro}"
           f"{', PRUEBA: no se envia nada' if args.probar else ''})")
     print("[Pico] En las gafas: https://vuer.ai?ws=wss://<IP de esta PC>:8012 -> Virtual Reality")
 
     ultimo, t_ultimo, bloqueo, t_bloq = "", 0.0, "", 0.0
+    uv, sel = None, None
     last_stat, last_log, was_conn = 0.0, {}, False
     dt = 1.0 / args.fps
     try:
@@ -312,8 +553,32 @@ def main():
                     on = [k for k, v in s.items() if v]
                     print(f"[Pico] botones: {', '.join(on) if on else '(ninguno)'}")
                     last_log = dict(s)
-            acts = mp.update(s, t0) if conn else []
+            # puntero: pixel del video al que apunta el mando y caja bajo el cursor
+            uv, sel, H, M = None, None, None, None
+            src_hw = None if src.frame is None else src.frame.shape[:2]
+            hay_cajas = bool(sp.cajas) and ":%d" % args.vision_port in src.src and t0 - sp.t < 1.5
+            if ptr is not None and conn:
+                if isinstance(ptr, CursorJoystick):
+                    ptr.update((getattr(tv, "left_ctrl_thumbstickValue", [0, 0])), t0)
+                    uv = ptr.pixel()
+                else:
+                    H, M = read_poses(tv, args.mano)
+                    if H is not None:
+                        uv = ptr.pixel(H, M)
+                if hay_cajas:
+                    k_sel, rect = caja_bajo(sp.cajas, uv, src_hw, args.alto, args.ancho)
+                    sel = (k_sel, rect) if k_sel else None
+            cal = ptr is None or ptr.calibrado
+            acts = mp.update(s, t0, punto=sel[0] if sel else None, cal=cal) if conn else []
             for k, label in acts:
+                if k == "CAL":
+                    if isinstance(ptr, Puntero) and H is not None and ptr.calibrar(H, M):
+                        label = "puntero calibrado"
+                    else:
+                        label = "calibrar: sin pose del mando"
+                    ultimo, t_ultimo = label, t0
+                    print(f"[Pico] {label}")
+                    continue
                 link.key(k)
                 ultimo, t_ultimo = label, t0
                 print(f"[Pico] {label} -> tecla {'ESPACIO' if k == ' ' else k}{' (prueba: no enviada)' if args.probar else ''}")
@@ -324,8 +589,11 @@ def main():
             if not args.sin_video:
                 age = t0 - src.t if src.frame is not None else 1e9
                 seguro_on = mp.seguro_ok(s)
+                ptxt = "" if ptr is None else ("puntero: " + ("calibrado" if cal else "SIN CALIBRAR") + (
+                    f" sobre {Mapper.NOMBRES[sel[0]]}" if sel else ""))
                 img = compose(src.frame, age, args.alto, args.ancho, args.seguro, ultimo if t0 - t_ultimo < 4 else "",
-                              bloqueo, seguro_on, src.src)
+                              bloqueo, seguro_on, src.src, cajas=sp.cajas if hay_cajas else None, uv=uv, sel=sel,
+                              cal=cal, puntero_txt=ptxt)
                 tv.render_to_xr(img)
             if t0 - last_stat > 0.5:
                 last_stat = t0
@@ -333,7 +601,9 @@ def main():
                              "ultimo": ultimo if t0 - t_ultimo < 6 else "", "bloqueo": bloqueo,
                              "fuente": ("programa" if ":%d" % args.vision_port in src.src else ("camara" if src.src else "")),
                              "video_ok": src.frame is not None and t0 - src.t < 2.5, "probar": args.probar,
-                             "botones": [k for k, v in s.items() if v]})
+                             "botones": [k for k, v in s.items() if v],
+                             "puntero": {"modo": args.puntero, "calibrado": bool(cal), "sobre": Mapper.NOMBRES.get(sel[0]) if sel else "",
+                                         "cajas": sorted(int(k) for k in sp.cajas) if hay_cajas else []}})
             sl = dt - (time.time() - t0)
             if sl > 0:
                 time.sleep(sl)
@@ -345,6 +615,7 @@ def main():
             link.key(" ")
             time.sleep(0.3)
         src.stop = True
+        sp.stop = True
         try:
             tv.close()
         except Exception:  # noqa: BLE001
