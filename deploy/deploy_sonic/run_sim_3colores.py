@@ -8,7 +8,7 @@ Igual que gear_sonic/scripts/run_sim_loop.py, pero:
 
 Uso (Terminal 1, entorno .venv_teleop, desde la raiz de GR00T-WholeBodyControl):
     python <ruta>/deploy/deploy_sonic/run_sim_3colores.py
-    SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5557
+    SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5567
 """
 import os
 import pathlib

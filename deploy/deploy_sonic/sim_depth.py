@@ -2,7 +2,7 @@
 
 Se engancha al render que ya hace el simulador: despues de cada actualizacion del RGB renderiza la
 misma camara en modo profundidad y publica un PNG de 16 bits (mm) en tcp://*:<puerto> (ver depth_cam.py).
-Se activa con la variable de entorno SIM_DEPTH=1 (SIM_DEPTH_PORT=5557, SIM_DEPTH_EVERY=2, SIM_DEPTH_MAX=8.0).
+Se activa con la variable de entorno SIM_DEPTH=1 (SIM_DEPTH_PORT=5567, SIM_DEPTH_EVERY=2, SIM_DEPTH_MAX=8.0).
 """
 import os
 
@@ -41,7 +41,7 @@ def install_depth_publisher(sim, port=None, every=None, max_m=None, cam_key="ego
     import cv2
     import zmq
 
-    port = int(port or os.environ.get("SIM_DEPTH_PORT", 5557))
+    port = int(port or os.environ.get("SIM_DEPTH_PORT", 5567))
     every = int(every or os.environ.get("SIM_DEPTH_EVERY", 2))
     max_m = float(max_m or os.environ.get("SIM_DEPTH_MAX", 8.0))
     env = _find_env(sim)

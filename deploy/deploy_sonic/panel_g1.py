@@ -45,7 +45,7 @@ DEFAULT_CFG = {
     "voz_activacion": "zuu", "voz_umbral": 300, "voz_idioma": "es-CO",
     "usar_voz": True, "usar_mic": True, "dry_run": False,
     "vision_port": 8765, "modo": "real",
-    "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5557, "depth_far": 4.0,
+    "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5567, "depth_far": 4.0,
 }
 
 

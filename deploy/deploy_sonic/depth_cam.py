@@ -3,11 +3,11 @@
 
 Formato de red (igual en el robot real y en el simulador): cada mensaje ZMQ PUB es UN PNG de 16 bits
 (cv2.imencode('.png', uint16)) con la profundidad en MILIMETROS, alineada a la imagen a color (0 = sin dato).
-  * robot real : realsense_pub.py en el PC2  -> tcp://192.168.123.164:55557  (RGB JPEG en :55555)
-  * simulador  : run_sim_3colores.py con SIM_DEPTH=1 -> tcp://127.0.0.1:5557 (RGB en :5555)
+  * robot real : realsense_pub.py en el PC2  -> tcp://192.168.123.164:55567  (RGB JPEG en :55555)
+  * simulador  : run_sim_3colores.py con SIM_DEPTH=1 -> tcp://127.0.0.1:5567 (RGB en :5555)
 
 Uso suelto (ver la profundidad en una ventana):
-    python depth_cam.py --host 192.168.123.164 --port 55557
+    python depth_cam.py --host 192.168.123.164 --port 55567
 """
 import argparse
 import threading
@@ -136,7 +136,7 @@ def compose(rgb_rgb, depth_mm, mode, near=0.2, far=4.0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="192.168.123.164")
-    ap.add_argument("--port", type=int, default=55557)
+    ap.add_argument("--port", type=int, default=55567)
     ap.add_argument("--far", type=float, default=4.0, help="distancia (m) del extremo frio de la escala")
     a = ap.parse_args()
     rx = DepthReceiver(a.host, a.port)
