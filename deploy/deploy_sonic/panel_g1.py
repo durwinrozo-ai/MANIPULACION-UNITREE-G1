@@ -295,9 +295,12 @@ def start_proc(name, real=None):
         return P.start(venv_prefix() + f"python {sh_q(sd)}/deploy_sonic_vision.py " + " ".join(a),
                        ready=r"comando start enviado|start reenviado", error=r"\[ERROR\]|Traceback|Address already in use")
     if name == "pico":
-        act = ('for c in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" /opt/conda; do '
-               '[ -f "$c/etc/profile.d/conda.sh" ] && . "$c/etc/profile.d/conda.sh" && break; done; '
-               f"conda activate {sh_q(c['pico_env'])} && ")
+        env = sh_q(c['pico_env'])
+        act = ('PY=""; for c in "$HOME/miniconda" "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "$HOME/mambaforge" '
+               '/opt/conda "$CONDA_PREFIX_1" "$CONDA_PREFIX"; do '
+               f'[ -x "$c/envs/{c["pico_env"]}/bin/python" ] && PY="$c/envs/{c["pico_env"]}/bin/python" && break; done; '
+               f'[ -n "$PY" ] || PY=$(conda run -n {env} which python 2>/dev/null); '
+               '[ -n "$PY" ] || { echo "ERROR: no encuentro el entorno conda"; exit 1; }; ')
         PICO.update(visor=False, gafas=False, ultimo="", t=0.0)
         a = [f"--panel http://127.0.0.1:{PORT_PANEL['v']}", f"--vision-port {c['vision_port']}",
              f"--modo {c['pico_modo']}", f"--seguro {c['pico_seguro']}", f"--puntero {c['pico_puntero']}",
@@ -305,7 +308,7 @@ def start_proc(name, real=None):
              f"--puntero-yaw {c['pico_yaw']}", f"--puntero-pitch {c['pico_pitch']}"]
         if PICO_FLAGS["probar"]:
             a.append("--probar")
-        return P.start(act + f"python {sh_q(sd)}/pico_visor.py " + " ".join(a),
+        return P.start(act + f"\"$PY\" {sh_q(sd)}/pico_visor.py " + " ".join(a),
                        ready=r"visor web listo", error=r"Traceback|Address already in use|ERROR|No such file")
     if name == "voz":
         return P.start(venv_prefix() + f"python {sh_q(sd)}/voz_cajas.py --fuente udp --puerto {c['udp_puerto']} "
