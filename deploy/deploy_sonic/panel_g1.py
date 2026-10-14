@@ -268,7 +268,7 @@ def start_proc(name, real=None):
     if name == "sim":
         env = f"SIM_DEPTH=1 SIM_DEPTH_PORT={int(c['sim_depth_port'])} " if c.get("sim_depth") else ""
         return P.start(venv_prefix() + env + f"python {sh_q(sd)}/run_sim_3colores.py",
-                       ready=r"Sensor server running", error=r"Traceback|Error")
+                       ready=r"Sensor server running", error=r"Traceback|Segmentation fault|Address already in use|core dumped")
     if name == "deploy":
         iface = c["iface"] if real else "sim"
         return P.start(f"cd {sh_q(c['gr00t'])}/gear_sonic_deploy && source scripts/setup_env.sh && "
