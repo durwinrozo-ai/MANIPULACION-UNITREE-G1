@@ -467,7 +467,7 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 **Cada vez:**
 1. Arranca todo como siempre (robot real o simulador + programa de cajas).
 2. En el panel, tarjeta **Lentes Pico 4 y mandos** → **Iniciar visor** (o marca «Incluir en Arrancar todo»). Deben verse «Visor activo» y «Video del programa».
-3. En el navegador del Pico (barra de direcciones, no el buscador): la primera vez abre `https://<IP>:8012` y acepta el certificado; después `https://vuer.ai?ws=wss://<IP>:8012` → **Virtual Reality**. El panel muestra «Gafas conectadas».
+3. En el navegador del Pico (barra de direcciones, no el buscador): escribe `https://<IP>:8012/?ws=wss://<IP>:8012` (la página la sirve la propia PC), acepta el aviso del certificado («Avanzado» → «Continuar de todas formas») y pulsa **Virtual Reality**. El panel muestra «Gafas conectadas».
 4. Vista **ego** (ventana con el entorno real alrededor, recomendada para trabajar con el robot) o **inmersiva**. Si solo ves la cuadrícula, gira y mira alrededor.
 
 | Mando | Orden |

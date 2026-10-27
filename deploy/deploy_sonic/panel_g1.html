@@ -112,7 +112,7 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
     </div>
     <p style="margin:8px 0 2px;color:var(--mut)">En las gafas (navegador del Pico, barra de direcciones): <b id="pk_url" style="user-select:all"></b>
       <button onclick="navigator.clipboard&&navigator.clipboard.writeText($('pk_url').textContent)">Copiar</button>
-      → «Virtual Reality». Primera vez: abrir antes <span id="pk_url2" style="user-select:all"></span> y aceptar el certificado.</p>
+      → aceptar el aviso del certificado («Avanzado» → «Continuar») → «Virtual Reality». Si solo ves la cuadrícula azul y negra, el certificado no se aceptó y las gafas no se conectaron (el panel dirá «Gafas sin conectar»). <span id="pk_url2" style="display:none"></span></p>
     <table class="mini"><tr><th>Mando</th><th>Orden</th><th>Mando</th><th>Orden</th></tr>
       <tr><td><b>A</b> (der.)</td><td>🟥 Rojo</td><td><b>X</b> (izq.)</td><td>🟦 Azul</td></tr>
       <tr><td><b>B</b> (der.)</td><td>🟩 Verde</td><td><b>Y</b> (izq.) mantener</td><td>🚶 Avanzar recto (al soltar: PARAR)</td></tr>

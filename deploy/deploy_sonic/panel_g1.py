@@ -592,7 +592,7 @@ def vision_voz(on):
 def pico_info():
     d = dict(PICO)
     d["activo"] = PROCS["pico"].alive() and time.time() - PICO.get("t", 0) < 3.0
-    d["url_vuer"] = f"https://vuer.ai?ws=wss://{CFG['pico_pc_ip']}:8012"
+    d["url_vuer"] = f"https://{CFG['pico_pc_ip']}:8012/?ws=wss://{CFG['pico_pc_ip']}:8012"
     d["url_local"] = f"https://{CFG['pico_pc_ip']}:8012"
     return d
 

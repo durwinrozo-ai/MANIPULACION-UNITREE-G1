@@ -103,7 +103,7 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 **Cada vez:**
 1. Arranca todo como siempre (robot real o simulador + programa de cajas).
 2. En el panel, tarjeta **Lentes Pico 4 y mandos** → **Iniciar visor** (o marca «Incluir en Arrancar todo»). Deben verse «Visor activo» y «Video del programa».
-3. En el navegador del Pico (barra de direcciones, no el buscador): la primera vez abre `https://<IP>:8012` y acepta el certificado; después `https://vuer.ai?ws=wss://<IP>:8012` → **Virtual Reality**. El panel muestra «Gafas conectadas».
+3. En el navegador del Pico (barra de direcciones, no el buscador): escribe `https://<IP>:8012/?ws=wss://<IP>:8012` (la página la sirve la propia PC), acepta el aviso del certificado («Avanzado» → «Continuar de todas formas») y pulsa **Virtual Reality**. El panel muestra «Gafas conectadas».
 4. Vista **ego** (ventana con el entorno real alrededor, recomendada para trabajar con el robot) o **inmersiva**. Si solo ves la cuadrícula, gira y mira alrededor.
 
 | Mando | Orden |
@@ -160,6 +160,7 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | Simulador marcado ERROR pero abierto | Resuelto en la última versión (el aviso «Channel factory init error» es inofensivo): `git pull` y reiniciar el panel |
 | `Lost LowState` en el deploy | Se perdió la red con el robot: revisar sección 2 y reiniciar el deploy |
 | «No llega profundidad» | Real: elegir «RealSense propio» y reiniciar A. Simulador: marcar la casilla y reiniciar el simulador |
+| Pico: entra a Virtual Reality pero solo se ve la cuadrícula azul y negra; el panel dice «Gafas sin conectar» | El certificado de `https://<IP>:8012` no se aceptó (el websocket no conecta), o hay otra pestaña de Vuer abierta en la PC | Abrir `https://<IP>:8012/?ws=wss://<IP>:8012` en las gafas y aceptar el certificado; cerrar la pestaña de Vuer de la PC; reiniciar el visor |
 | Dice `LLEGO` sin caminar | La caja ya está más cerca que la parada; alejarla |
 | El robot no camina | Ver `Planner enabled`, `avanzando mode=1` en el programa de cajas y `SLOW_WALK` en el deploy |
 

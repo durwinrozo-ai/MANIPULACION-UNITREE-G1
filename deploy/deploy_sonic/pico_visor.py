@@ -534,7 +534,7 @@ def main():
         ptr = None
     print(f"[Pico] visor web listo en https://<IP de esta PC>:8012  (modo {args.modo}, seguro={args.seguro}"
           f"{', PRUEBA: no se envia nada' if args.probar else ''})")
-    print("[Pico] En las gafas: https://vuer.ai?ws=wss://<IP de esta PC>:8012 -> Virtual Reality")
+    print("[Pico] En las gafas: https://<IP de esta PC>:8012/?ws=wss://<IP de esta PC>:8012 -> Virtual Reality")
 
     ultimo, t_ultimo, bloqueo, t_bloq = "", 0.0, "", 0.0
     uv, sel = None, None
