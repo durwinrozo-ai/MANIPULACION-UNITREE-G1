@@ -30,7 +30,8 @@ PUNTERO (--puntero rayo|joystick|off). En las gafas se ve el video del robot con
 de cada caja detectada (rojo/verde/azul). Se apunta con el mando derecho (rayo) o se mueve el cursor con el
 joystick izquierdo (--puntero joystick, alternativa que no depende de la pose del mando). La caja bajo el
 cursor se resalta; el GATILLO DERECHO la elige y el robot va hacia ella (igual que pulsar su color).
-Rayo: antes de usarlo, apuntar a la cruz del centro y apretar los dos joysticks a la vez (CALIBRAR);
+Rayo: antes de usarlo, apuntar a la cruz del centro y CALIBRAR: gatillo derecho (la primera vez), o los dos
+joysticks a la vez, o mantener un clic de joystick 1 s, o --cal-auto N (solo, a los N s de conectar);
 --plano mundo|head dice si el plano del video esta fijo en el espacio (defecto) o pegado a la cabeza.
 
 SEGURIDAD (--seguro):
@@ -71,7 +72,7 @@ class Mapper:
     """
     KEYS = (("rA", "1", "ROJO"), ("rB", "2", "VERDE"), ("lX", "3", "AZUL"))
     NOMBRES = {1: "ROJO", 2: "VERDE", 3: "AZUL"}
-    VENTANA = 0.30  # s: los dos clics de joystick deben llegar dentro de esta ventana para calibrar
+    HOLD = 1.0  # s: un clic de joystick mantenido este tiempo calibra el puntero
 
     def __init__(self, seguro="habilitar", avanzar_cada=1.0, puntero=True):
         self.seguro = seguro
@@ -82,7 +83,8 @@ class Mapper:
         self.avanzando = False
         self.activo = False  # hay un destino en marcha pedido desde los mandos
         self.bloqueo = ""
-        self.pend = {}  # clic de joystick esperando a ver si llega el otro (calibracion)
+        self.down = {}      # instante en que se apreto cada clic de joystick
+        self.anulado = {}   # ese clic ya se uso para calibrar: no actua al soltar
 
     def seguro_ok(self, s):
         return self.seguro == "off" or bool(s.get("gripL") or s.get("gripR"))
@@ -99,27 +101,36 @@ class Mapper:
             out.append((" ", "PARAR"))
             self.avanzando = False
             self.activo = False
-        # clics de joystick: solos = Inspeccionar / Quieto; los dos juntos = calibrar el puntero
+        # clics de joystick: solo (corto) = Inspeccionar / Quieto; calibrar el puntero = los dos a la vez
+        # o MANTENER uno apretado HOLD segundos. El clic corto actua al soltar.
         cal_pedida = False
         for k, key, label in (("rStick", "s", "INSPECCIONAR"), ("lStick", "0", "QUIETO")):
+            otro = "lStick" if k == "rStick" else "rStick"
             if up(k):
-                otro = "lStick" if k == "rStick" else "rStick"
-                if otro in self.pend or s.get(otro):
-                    self.pend.clear()
+                if s.get(otro):                      # los dos a la vez
+                    self.anulado.update({k: True, otro: True})
                     if not cal_pedida:
                         out.append(("CAL", "CALIBRAR puntero"))
                         cal_pedida = True
                 else:
-                    self.pend[k] = (now, key, label)
-        for k, (t, key, label) in list(self.pend.items()):
-            if now - t >= self.VENTANA:
-                del self.pend[k]
-                if key == "s" and not ok:
-                    self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
-                    continue
-                out.append((key, label))
-                self.avanzando = False
-                self.activo = False
+                    self.down[k] = now
+                    self.anulado[k] = False
+            elif s.get(k):                           # sigue apretado: calibrar si es largo
+                if k in self.down and not self.anulado.get(k) and now - self.down[k] >= self.HOLD:
+                    self.anulado[k] = True
+                    if not cal_pedida:
+                        out.append(("CAL", "CALIBRAR puntero (clic largo)"))
+                        cal_pedida = True
+            elif self.prev.get(k) and k in self.down:  # al soltar: clic corto
+                dur = now - self.down.pop(k)
+                if not self.anulado.get(k) and dur < self.HOLD:
+                    if key == "s" and not ok:
+                        self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
+                    else:
+                        out.append((key, label))
+                        self.avanzando = False
+                        self.activo = False
+                self.anulado[k] = False
         for name, key, label in self.KEYS:
             if up(name):
                 if ok:
@@ -133,8 +144,8 @@ class Mapper:
                     out.append(("s", "INSPECCIONAR"))
                 else:
                     self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
-            elif not cal:
-                self.bloqueo = "Calibra el puntero: apunta a la cruz y aprieta los 2 joysticks"
+            elif not cal:  # primera vez: el gatillo derecho calibra (apuntando a la cruz del centro)
+                out.append(("CAL", "CALIBRAR puntero (gatillo)"))
             elif punto not in (1, 2, 3):
                 self.bloqueo = "Apunta a una caja y aprieta el gatillo"
             elif ok:
@@ -399,7 +410,7 @@ def compose(frame, age, h, w, seguro_txt, ultimo, bloqueo, seguro_on, src, cajas
         cx, cy = w // 2, (h - 64) // 2
         cv2.line(img, (cx - 30, cy), (cx + 30, cy), (0, 255, 255), 2, cv2.LINE_AA)
         cv2.line(img, (cx, cy - 30), (cx, cy + 30), (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(img, "CALIBRAR: apunta a la cruz y aprieta los 2 joysticks", (cx - 270, cy + 60),
+        cv2.putText(img, "CALIBRAR: apunta a la cruz y aprieta el gatillo derecho", (cx - 290, cy + 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
     bar = 64
     ov = img.copy()
@@ -499,6 +510,8 @@ def main():
     ap.add_argument("--puntero-escala", type=float, default=1.0, help="ajusta el tamaño del plano del video si el cursor no llega a los bordes")
     ap.add_argument("--puntero-yaw", type=float, default=0.0, help="grados: ajuste fino del eje del rayo")
     ap.add_argument("--puntero-pitch", type=float, default=0.0)
+    ap.add_argument("--cal-auto", type=float, default=0.0,
+                    help="segundos tras conectar las gafas para calibrar solo el puntero (apuntando a la cruz); 0 = no")
     ap.add_argument("--mano", choices=["derecha", "izquierda"], default="derecha", help="mando que apunta (rayo)")
     ap.add_argument("--probar", action="store_true", help="no manda nada al robot: solo muestra los botones")
     ap.add_argument("--sin-video", action="store_true", help="solo mandos (no entrega imagen a las gafas)")
@@ -539,6 +552,7 @@ def main():
     ultimo, t_ultimo, bloqueo, t_bloq = "", 0.0, "", 0.0
     uv, sel = None, None
     last_stat, last_log, was_conn = 0.0, {}, False
+    t_auto = None
     dt = 1.0 / args.fps
     try:
         while True:
@@ -568,6 +582,19 @@ def main():
                 if hay_cajas:
                     k_sel, rect = caja_bajo(sp.cajas, uv, src_hw, args.alto, args.ancho)
                     sel = (k_sel, rect) if k_sel else None
+            auto_txt = ""
+            if args.cal_auto > 0 and isinstance(ptr, Puntero) and conn and not ptr.calibrado:
+                if t_auto is None:
+                    t_auto = t0
+                falta = args.cal_auto - (t0 - t_auto)
+                if falta > 0:
+                    auto_txt = f"calibrando en {int(falta) + 1} s: apunta a la cruz del centro"
+                elif H is not None and ptr.calibrar(H, M):
+                    ultimo, t_ultimo = "puntero calibrado (automatico)", t0
+                    print("[Pico] puntero calibrado (automatico)")
+                    t_auto = None
+            elif not conn:
+                t_auto = None
             cal = ptr is None or ptr.calibrado
             acts = mp.update(s, t0, punto=sel[0] if sel else None, cal=cal) if conn else []
             for k, label in acts:
@@ -589,8 +616,8 @@ def main():
             if not args.sin_video:
                 age = t0 - src.t if src.frame is not None else 1e9
                 seguro_on = mp.seguro_ok(s)
-                ptxt = "" if ptr is None else ("puntero: " + ("calibrado" if cal else "SIN CALIBRAR") + (
-                    f" sobre {Mapper.NOMBRES[sel[0]]}" if sel else ""))
+                ptxt = "" if ptr is None else (auto_txt or ("puntero: " + ("calibrado" if cal else "SIN CALIBRAR") + (
+                    f" sobre {Mapper.NOMBRES[sel[0]]}" if sel else "")))
                 img = compose(src.frame, age, args.alto, args.ancho, args.seguro, ultimo if t0 - t_ultimo < 4 else "",
                               bloqueo, seguro_on, src.src, cajas=sp.cajas if hay_cajas else None, uv=uv, sel=sel,
                               cal=cal, puntero_txt=ptxt)

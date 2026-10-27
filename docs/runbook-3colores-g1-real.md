@@ -477,10 +477,11 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (repite `w`; al soltar: PARAR) |
 | **Gatillo derecho** | **Elegir la caja a la que apuntas con el puntero** |
-| Clic del joystick derecho | Inspeccionar |
-| Clic del joystick izquierdo | Quieto |
+| Clic corto del joystick derecho | Inspeccionar |
+| Clic corto del joystick izquierdo | Quieto |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
-| Los dos clics a la vez | Calibrar el puntero |
+| Gatillo derecho (puntero sin calibrar) | Calibrar el puntero apuntando a la cruz del centro |
+| Los dos clics a la vez, o mantener un clic 1 s | Calibrar de nuevo el puntero |
 | Grip (lateral) | Seguro |
 
 **Puntero para elegir la caja.** En las gafas, cada caja que el programa de cajas detecta lleva un recuadro fino (rojo, verde o azul). Apuntas con el mando derecho (un cursor amarillo muestra dónde cae el rayo), la caja apuntada se resalta con un recuadro grueso y su nombre, y el **gatillo derecho** manda al robot hacia ella, igual que pulsar su color. Pide el mismo seguro (grip) que las demás órdenes de movimiento. Solo funciona con el programa de cajas encendido (es quien detecta las cajas).
