@@ -9,6 +9,7 @@ Igual que gear_sonic/scripts/run_sim_loop.py, pero:
 Uso (Terminal 1, entorno .venv_teleop, desde la raiz de GR00T-WholeBodyControl):
     python <ruta>/deploy/deploy_sonic/run_sim_3colores.py
     SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5567
+    SIM_X11=0 python ...                # no forzar X11 (por defecto se abre por XWayland)
     SIM_WIN=800x600+100+80 python ...   # tamano/posicion de la ventana (por defecto 1000x700+60+60; SIM_WIN=off no la toca)
 """
 import os
@@ -17,6 +18,13 @@ import sys
 from typing import Dict
 
 import tyro
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from ventana_x11 import forzar_x11
+
+# El visor de MuJoCo debe abrirse por XWayland (X11): ahi la ventana tiene barra y se mueve/redimensiona.
+# Tiene que hacerse antes de importar/abrir el visor. SIM_X11=0 lo desactiva.
+_X11 = forzar_x11()
 
 import gear_sonic
 from gear_sonic.data.robot_model.instantiation.g1 import instantiate_g1_robot_model
@@ -55,6 +63,7 @@ def main(config: SimLoopConfig):
     wbc_config["ROBOT_SCENE"] = str(scene)  # ruta absoluta: base_sim la respeta
     print(f"[3colores] escena base : {original}")
     print(f"[3colores] escena final: {scene}")
+    print(f"[3colores] ventana: {'XWayland/X11 forzado' if _X11 else 'plataforma por defecto (sin DISPLAY o SIM_X11=0)'}")
 
     robot_model = instantiate_g1_robot_model()
     sim_wrapper = SimWrapper(

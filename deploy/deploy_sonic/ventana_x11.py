@@ -22,6 +22,28 @@ import time
 DEFECTO = (1000, 700, 60, 60)
 
 
+def forzar_x11():
+    """Obliga a GLFW (visor de MuJoCo) a usar X11/XWayland aunque la sesion sea Wayland.
+
+    En Wayland nativo la ventana la dibuja el compositor y no se puede mover/redimensionar desde aqui;
+    por XWayland si. Debe llamarse ANTES de abrir el visor. SIM_X11=0 lo desactiva.
+    Devuelve True si hay DISPLAY (XWayland disponible) y se forzo X11."""
+    if os.environ.get("SIM_X11", "1").strip().lower() in ("0", "off", "no", "false"):
+        return False
+    if not os.environ.get("DISPLAY"):
+        return False  # sin XWayland no hay alternativa: se deja como esta
+    os.environ.pop("WAYLAND_DISPLAY", None)      # GLFW 3.3 y 3.4 eligen X11 si no ven Wayland
+    os.environ["XDG_SESSION_TYPE"] = "x11"
+    os.environ["GDK_BACKEND"] = "x11"
+    os.environ["SDL_VIDEODRIVER"] = "x11"
+    try:  # GLFW >= 3.4: peticion explicita
+        import glfw
+        glfw.init_hint(glfw.PLATFORM, glfw.PLATFORM_X11)
+    except Exception:
+        pass
+    return True
+
+
 def leer_config(valor=None):
     """Devuelve (w, h, x, y) o None si esta desactivado."""
     valor = os.environ.get("SIM_WIN", "") if valor is None else valor
