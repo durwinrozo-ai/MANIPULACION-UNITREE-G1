@@ -61,6 +61,7 @@ Abre `http://127.0.0.1:8080` y deja esa terminal abierta. La contraseña del rob
 2. **Arrancar todo**: simulador (1) → deploy (2) → programa de cajas (3). El simulador siempre va antes que el deploy.
 3. En la ventana de MuJoCo suelta el robot: `7` dos veces y luego `9`.
 4. Usa los mismos botones que en el robot real.
+5. La ventana de MuJoCo se abre como una ventana normal de 1000×700, que se mueve con el mouse y se redimensiona desde el borde. Para cambiarla: Ajustes → «Ventana de MuJoCo» (`AnchoxAlto+X+Y`, por ejemplo `800x600+100+80`; `off` deja el tamaño de MuJoCo). A mano: `SIM_WIN=800x600+100+80 python .../run_sim_3colores.py`. Solo actúa en X11/XWayland.
 
 ## 6. Cámaras RGB y profundidad
 

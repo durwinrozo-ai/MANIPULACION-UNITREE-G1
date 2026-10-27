@@ -9,6 +9,7 @@ Igual que gear_sonic/scripts/run_sim_loop.py, pero:
 Uso (Terminal 1, entorno .venv_teleop, desde la raiz de GR00T-WholeBodyControl):
     python <ruta>/deploy/deploy_sonic/run_sim_3colores.py
     SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5567
+    SIM_WIN=800x600+100+80 python ...   # tamano/posicion de la ventana (por defecto 1000x700+60+60; SIM_WIN=off no la toca)
 """
 import os
 import pathlib
@@ -64,6 +65,14 @@ def main(config: SimLoopConfig):
         offscreen=wbc_config.get("ENABLE_OFFSCREEN", False),
         enable_image_publish=config.enable_image_publish,
     )
+    # Ventana de MuJoCo: normal, mas pequena y movible (por defecto 1000x700). SIM_WIN=WxH+X+Y o off.
+    try:
+        sys.path.insert(0, str(HERE))
+        from ventana_x11 import ajustar_ventana_en_hilo
+        if wbc_config.get("ENABLE_ONSCREEN", True):
+            ajustar_ventana_en_hilo()
+    except Exception as e:  # nunca debe impedir que arranque la simulacion
+        print(f"[3colores] no se pudo ajustar la ventana: {e}")
     if os.environ.get("SIM_DEPTH") == "1":  # profundidad de head_camera (ver sim_depth.py)
         sys.path.insert(0, str(HERE))
         from sim_depth import install_depth_publisher
