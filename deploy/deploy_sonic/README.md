@@ -170,7 +170,7 @@ No uses `pkill -f` con la ruta del programa: coincide con su propia línea de co
 `~/teleimager/cam_config_server.yaml` puede volver a los valores de fábrica tras un reinicio (síntoma: error de `left_wrist_camera`).
 Debe quedar: `head_camera` con `enable_zmq: true`, `zmq_port: 55555`, `type: realsense`, `image_shape: [480, 640]`,
 `binocular: false`, `serial_number: "347622070449"`; `left_wrist_camera` y `right_wrist_camera` con `enable_zmq: false`.
-Conviene guardar una copia buena (`cp cam_config_server.yaml ~/cam_config_server.good.yaml`).
+Conviene guardar una copia buena (`cp cam_config_server.yaml ~/cam_config_server.good.yaml`). Desde la versión del 28/10/2026, `start_camera.sh` lo arregla solo: si `head_camera` no es realsense restaura `~/cam_config_server.good.yaml` o genera una configuración correcta (serial `347622070449`, cámaras de muñeca desactivadas) y guarda la de fábrica en `~/cam_config_server.factory.yaml`. Hay que volver a copiar el script al robot con **Preparar robot (scp)**.
 
 Comprobación desde el PC: `cd ~/LSC-Mafe && source venv/bin/activate && python -m robot.probar_camara_g1 192.168.123.164` → `OK: ~30 fps, frame 640x480`.
 

@@ -6,7 +6,69 @@ MODO=${1:-teleimager}
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 sudo -v || exit 1
 cd ~/teleimager
-[ "$MODO" = "rgbd" ] || grep -q 'type: realsense' cam_config_server.yaml || echo "AVISO: cam_config_server.yaml no es realsense, revisalo"
+
+# cam_config_server.yaml vuelve a los valores de fabrica tras reiniciar el robot (sintoma: error de left_wrist_camera).
+# Si head_camera no es realsense, se restaura la copia buena (~/cam_config_server.good.yaml) o se genera una.
+CFG=cam_config_server.yaml
+if [ "$MODO" != "rgbd" ] && ! grep -q 'type: realsense' $CFG 2>/dev/null; then
+  cp -n $CFG ~/cam_config_server.factory.yaml 2>/dev/null
+  if [ -f ~/cam_config_server.good.yaml ] && grep -q 'type: realsense' ~/cam_config_server.good.yaml; then
+    cp ~/cam_config_server.good.yaml $CFG && echo "[cam] $CFG restaurado desde ~/cam_config_server.good.yaml"
+  else
+    cat > $CFG <<'YAML'
+webrtc:
+  bitrate:
+    min: 2000000
+    default: 5000000
+    max: 12000000
+  gop_length: 60
+
+head_camera:
+  enable_zmq: true
+  zmq_port: 55555
+  enable_webrtc: false
+  webrtc_port: 60001
+  webrtc_codec: h264
+  type: realsense
+  image_shape: [480, 640]
+  binocular: false
+  fps: 30
+  video_id: 0
+  serial_number: "347622070449"
+  physical_path: null
+
+left_wrist_camera:
+  enable_zmq: false
+  zmq_port: 55556
+  enable_webrtc: false
+  webrtc_port: 60002
+  webrtc_codec: h264
+  type: opencv
+  image_shape: [480, 640]
+  binocular: false
+  fps: 30
+  video_id: 2
+  serial_number: null
+  physical_path: null
+
+right_wrist_camera:
+  enable_zmq: false
+  zmq_port: 55557
+  enable_webrtc: false
+  webrtc_port: 60003
+  webrtc_codec: h264
+  type: opencv
+  image_shape: [480, 640]
+  binocular: false
+  fps: 30
+  video_id: 4
+  serial_number: null
+  physical_path: null
+YAML
+    echo "[cam] $CFG regenerado (head_camera realsense, camaras de muneca desactivadas)"
+  fi
+  cp -n $CFG ~/cam_config_server.good.yaml 2>/dev/null
+fi
 
 liberar() {
   for p in $(sudo fuser /dev/video* 2>/dev/null); do
