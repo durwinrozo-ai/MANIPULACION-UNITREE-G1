@@ -40,7 +40,7 @@ DEFAULT_CFG = {
     "robot_user": "unitree", "robot_pc2": "192.168.123.164", "robot_pc1": "192.168.123.161",
     "pc_ip": "192.168.123.222", "iface": "enp131s0",
     "hsv_file": "~/tres-colores/hsv_real.json",
-    "mic_nombre": "Insta,LARK,Hollyland", "udp_puerto": 5600,
+    "mic_nombre": "auto", "udp_puerto": 5600,
     "stop_y": 0.93, "walk_speed": 0.3, "max_walk": 0.3, "slow_y": 0.80, "slow_speed": 0.15, "scan_ang_vel": 0.3,
     "voz_activacion": "zuu", "voz_umbral": 300, "voz_idioma": "es-CO",
     "usar_voz": True, "usar_mic": True, "dry_run": False,
@@ -267,7 +267,7 @@ def start_proc(name, real=None):
                        ready=r"head_camera is ready|Running\.\.\.|\[rs\] publicando",
                        error=r"busy|Failed to initialize|Permission denied|No route|timed out|\[rs\] ERROR")
     if name == "mic":
-        remote = (f"python3 ~/mic_stream_g1.py --nombre {c['mic_nombre']} --destino {c['pc_ip']} "
+        remote = (f"python3 ~/mic_stream_g1.py --nombre {sh_q(str(c['mic_nombre']).strip() or 'auto')} --destino {c['pc_ip']} "
                   f"--puerto {c['udp_puerto']}")
         return P.start(ssh_cmd(remote), ready=r"enviados \d+ bloques", error=r"No such file|Permission denied|error|no hay|No se encontro")
     if name == "sim":

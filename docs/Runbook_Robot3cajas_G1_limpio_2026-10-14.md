@@ -162,7 +162,7 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | `Lost LowState` en el deploy | Se perdió la red con el robot: revisar sección 2 y reiniciar el deploy |
 | «No llega profundidad» | Real: elegir «RealSense propio» y reiniciar A. Simulador: marcar la casilla y reiniciar el simulador |
 | Pico: entra a Virtual Reality pero solo se ve la cuadrícula azul y negra; el panel dice «Gafas sin conectar» | El certificado de `https://<IP>:8012` no se aceptó (el websocket no conecta), o hay otra pestaña de Vuer abierta en la PC | Abrir `https://<IP>:8012/?ws=wss://<IP>:8012` en las gafas y aceptar el certificado; cerrar la pestaña de Vuer de la PC; reiniciar el visor |
-| Micrófono: `No encuentro una tarjeta con 'Insta'` (por ejemplo con otro micrófono, como el LARK M2) | El nombre configurado no coincide con el de la tarjeta de audio del robot | Ajustes → «Nombre del micrófono»: una parte del nombre que sale en el registro (`arecord -l`), varios separados por coma (`Insta,LARK,Hollyland`) o `auto` (primera tarjeta USB); reiniciar el micrófono (M) |
+| Micrófono: `No encuentro ningun microfono` | No hay ninguna tarjeta de entrada: el receptor/micrófono no está en un puerto USB del computador del robot, o está apagado | Enchufarlo al PC2 (no a la PC), encenderlo/emparejarlo, probar otro puerto; ver `ssh unitree@192.168.123.164 "arecord -l"`. El programa usa **cualquier micrófono USB, de cualquier marca**; si hay varios, usa el primero (Ajustes → «Micrófono»: parte del nombre para elegir otro) |
 | Dice `LLEGO` sin caminar | La caja ya está más cerca que la parada; alejarla |
 | El robot no camina | Ver `Planner enabled`, `avanzando mode=1` en el programa de cajas y `SLOW_WALK` en el deploy |
 

@@ -10,6 +10,7 @@ Solo usa la libreria estandar de Python y `arecord` (paquete alsa-utils: sudo ap
 `plughw` convierte solo a 16 kHz mono, sea cual sea el formato nativo del microfono.
 """
 import argparse
+import os
 import re
 import socket
 import subprocess
@@ -24,13 +25,24 @@ def arecord_l():
         sys.exit(1)
 
 
+INTERNAS = ("hdmi", "hda", "tegra", "nvidia", "dummy", "loopback")  # tarjetas internas: no son un microfono externo
+
+
+def es_usb(linea):
+    """True si la tarjeta de la linea de `arecord -l` esta en un puerto USB."""
+    m = re.search(r"(\d+):", linea)
+    if m and os.path.exists(f"/proc/asound/card{m.group(1)}/usbid"):
+        return True
+    return "usb" in linea.lower()
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--lista", action="store_true")
     p.add_argument("--tarjeta", help="numero de tarjeta de arecord -l")
     p.add_argument("--dispositivo", default="0")
-    p.add_argument("--nombre", help="parte del nombre de la tarjeta (p. ej. Insta). Varios, separados por coma, se "
-                   "prueban en orden (p. ej. Insta,LARK,Hollyland); 'auto' = la primera tarjeta USB de entrada")
+    p.add_argument("--nombre", help="opcional: parte del nombre de la tarjeta (varios, separados por coma). Sin nombre, 'auto' o si no "
+                   "coincide, se usa cualquier microfono USB (de cualquier marca)")
     p.add_argument("--destino", default="192.168.123.222", help="IP de la PC en el cable")
     p.add_argument("--puerto", type=int, default=5600)
     a = p.parse_args()
@@ -39,26 +51,35 @@ def main():
         print(arecord_l() or "(sin dispositivos de captura)")
         return 0
     card = a.tarjeta
-    if card is None and a.nombre:
+    if card is None:
         out = arecord_l()
         lineas = [l for l in out.splitlines() if l.lower().startswith(("tarjeta", "card"))]
-        for nom in [n.strip() for n in a.nombre.split(",") if n.strip()]:
-            clave = "usb" if nom.lower() == "auto" else nom.lower()
+        # 1) si se pidio un nombre concreto (puede ser una lista separada por comas), probarlo
+        for nom in [n.strip() for n in (a.nombre or "").split(",") if n.strip() and n.strip().lower() != "auto"]:
             for line in lineas:
-                if clave in line.lower():
+                if nom.lower() in line.lower():
                     card = re.search(r"(\d+):", line).group(1)
-                    print(f"[mic] tarjeta elegida ({nom}): {line.strip()}")
+                    print(f"[mic] tarjeta elegida por nombre ({nom}): {line.strip()}")
                     break
             if card is not None:
                 break
+        # 2) sin nombre, 'auto' o nombre que no coincide: cualquier microfono, de cualquier marca, que este en un puerto USB
         if card is None:
-            print(f"No encuentro una tarjeta con '{a.nombre}'. Tarjetas de entrada disponibles:")
-            print(out or "(ninguna: el microfono no aparece; revisa el cable USB / receptor)")
-            print("Pon en Ajustes -> Nombre del microfono una parte del nombre de arriba (o 'auto').")
+            if a.nombre and a.nombre.strip().lower() != "auto":
+                print(f"[mic] ninguna tarjeta se llama '{a.nombre}': busco cualquier microfono USB")
+            usb = [l for l in lineas if es_usb(l)]
+            cand = usb or [l for l in lineas if not any(x in l.lower() for x in INTERNAS)]
+            if cand:
+                if len(cand) > 1:
+                    print("[mic] hay varias tarjetas de entrada; uso la primera (para otra: --nombre o --tarjeta):")
+                    for l in cand:
+                        print("       " + l.strip())
+                card = re.search(r"(\d+):", cand[0]).group(1)
+                print(f"[mic] tarjeta elegida (automatico): {cand[0].strip()}")
+        if card is None:
+            print("No encuentro ningun microfono. Tarjetas de entrada disponibles:")
+            print(out or "(ninguna: el microfono no aparece; revisa el cable USB / receptor / que este encendido)")
             return 1
-    if card is None:
-        print("Indica --tarjeta N o --nombre TEXTO (ver --lista).")
-        return 1
     dev = f"plughw:{card},{a.dispositivo}"
     cmd = ["arecord", "-D", dev, "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "raw", "-q"]
     print(f"[mic] {' '.join(cmd)}  ->  udp://{a.destino}:{a.puerto}  (Ctrl+C para parar)")
