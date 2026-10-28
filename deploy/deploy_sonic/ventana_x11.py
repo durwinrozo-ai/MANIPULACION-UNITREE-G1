@@ -64,8 +64,12 @@ def forzar_x11():
         return False
     if not os.environ.get("DISPLAY"):
         return False  # sin XWayland no hay alternativa: se deja como esta
-    if not _probar_x11():  # en algunos equipos GLX sobre XWayland falla: entonces se usa la plataforma por defecto
-        print("[3colores] XWayland no puede abrir el visor en este equipo (GLX); uso la plataforma por defecto")
+    previo = os.environ.get("_SIM_X11_PRUEBA")  # los subprocesos (publicador de camara) heredan el resultado
+    ok = (previo == "1") if previo in ("0", "1") else _probar_x11()
+    os.environ["_SIM_X11_PRUEBA"] = "1" if ok else "0"
+    if not ok:  # en algunos equipos GLX sobre XWayland falla: entonces se usa la plataforma por defecto
+        if previo is None:
+            print("[3colores] XWayland no puede abrir el visor en este equipo (GLX); uso la plataforma por defecto")
         return False
     os.environ.pop("WAYLAND_DISPLAY", None)      # GLFW 3.3 y 3.4 eligen X11 si no ven Wayland
     os.environ["XDG_SESSION_TYPE"] = "x11"
