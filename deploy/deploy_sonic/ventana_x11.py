@@ -22,26 +22,41 @@ import time
 DEFECTO = (1000, 700, 60, 60)
 
 
-def forzar_x11():
-    """Obliga a GLFW (visor de MuJoCo) a usar X11/XWayland aunque la sesion sea Wayland.
+def modo_x11(valor=None):
+    """SIM_X11: 'off' (defecto: plataforma por defecto), 'x11' / '1' (XWayland con GLX) o 'egl' (XWayland con EGL)."""
+    v = (os.environ.get("SIM_X11", "") if valor is None else valor).strip().lower()
+    if v in ("1", "on", "yes", "true", "x11", "glx"):
+        return "x11"
+    if v == "egl":
+        return "egl"
+    return "off"
+
+
+def forzar_x11(valor=None):
+    """Opcional: obliga a GLFW (visor de MuJoCo) a usar X11/XWayland aunque la sesion sea Wayland.
 
     En Wayland nativo la ventana la dibuja el compositor y no se puede mover/redimensionar desde aqui;
-    por XWayland si. Debe llamarse ANTES de abrir el visor. SIM_X11=0 lo desactiva.
-    Devuelve True si hay DISPLAY (XWayland disponible) y se forzo X11."""
-    if os.environ.get("SIM_X11", "1").strip().lower() in ("0", "off", "no", "false"):
-        return False
-    if not os.environ.get("DISPLAY"):
-        return False  # sin XWayland no hay alternativa: se deja como esta
+    por XWayland si. Debe llamarse ANTES de abrir el visor. Se controla con SIM_X11 (ver modo_x11):
+    por defecto NO se fuerza, porque en algunos equipos GLX sobre XWayland no puede crear el contexto
+    ("GLX: Failed to create context: BadValue"); en ese caso probar SIM_X11=egl.
+    Devuelve el modo aplicado ('off', 'x11' o 'egl')."""
+    modo = modo_x11(valor)
+    if modo == "off" or not os.environ.get("DISPLAY"):
+        return "off"  # sin XWayland no hay alternativa: se deja como esta
     os.environ.pop("WAYLAND_DISPLAY", None)      # GLFW 3.3 y 3.4 eligen X11 si no ven Wayland
     os.environ["XDG_SESSION_TYPE"] = "x11"
     os.environ["GDK_BACKEND"] = "x11"
     os.environ["SDL_VIDEODRIVER"] = "x11"
-    try:  # GLFW >= 3.4: peticion explicita
+    try:
         import glfw
-        glfw.init_hint(glfw.PLATFORM, glfw.PLATFORM_X11)
-    except Exception:
-        pass
-    return True
+        glfw.init_hint(glfw.PLATFORM, glfw.PLATFORM_X11)   # GLFW >= 3.4: peticion explicita
+        if modo == "egl":
+            if not glfw.init():
+                raise RuntimeError("glfw.init fallo")
+            glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.EGL_CONTEXT_API)  # contexto por EGL en vez de GLX
+    except Exception as e:
+        print(f"[3colores] aviso al forzar X11 ({modo}): {e}")
+    return modo
 
 
 def leer_config(valor=None):

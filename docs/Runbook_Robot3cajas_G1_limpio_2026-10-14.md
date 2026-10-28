@@ -61,7 +61,7 @@ Abre `http://127.0.0.1:8080` y deja esa terminal abierta. La contraseña del rob
 2. **Arrancar todo**: simulador (1) → deploy (2) → programa de cajas (3). El simulador siempre va antes que el deploy.
 3. En la ventana de MuJoCo suelta el robot: `7` dos veces y luego `9`.
 4. Usa los mismos botones que en el robot real.
-5. La ventana de MuJoCo se abre como una ventana normal de 1000×700, que se mueve con el mouse y se redimensiona desde el borde. Para cambiarla: Ajustes → «Ventana de MuJoCo» (`AnchoxAlto+X+Y`, por ejemplo `800x600+100+80`; `off` deja el tamaño de MuJoCo). A mano: `SIM_WIN=800x600+100+80 python .../run_sim_3colores.py`. El simulador se abre siempre por XWayland (X11 dentro de la sesión Wayland), donde la ventana tiene barra; `SIM_X11=0` lo desactiva. Si no hay `DISPLAY` (sin XWayland) no puede actuar.
+5. La ventana de MuJoCo se abre como una ventana normal de 1000×700, que se mueve con el mouse y se redimensiona desde el borde. Para cambiarla: Ajustes → «Ventana de MuJoCo» (`AnchoxAlto+X+Y`, por ejemplo `800x600+100+80`; `off` deja el tamaño de MuJoCo). A mano: `SIM_WIN=800x600+100+80 python .../run_sim_3colores.py`. Si la ventana no tiene barra o no se puede mover (sesión Wayland), prueba Ajustes → «Ventana de MuJoCo por XWayland»: `x11` (o `egl`, experimental); por defecto es `off` porque en algunos equipos falla (`GLX: Failed to create context: BadValue` / `could not create window`): en ese caso volver a `off`.
 
 ## 6. Cámaras RGB y profundidad
 
