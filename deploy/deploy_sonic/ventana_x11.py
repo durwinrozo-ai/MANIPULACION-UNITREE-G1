@@ -22,16 +22,51 @@ import time
 DEFECTO = (1000, 700, 60, 60)
 
 
+_PRUEBA = """
+import time
+import glfw
+glfw.init_hint(glfw.PLATFORM, glfw.PLATFORM_X11)
+import mujoco, mujoco.viewer
+m = mujoco.MjModel.from_xml_string("<mujoco><worldbody><geom size='.1'/></worldbody></mujoco>")
+d = mujoco.MjData(m)
+h = mujoco.viewer.launch_passive(m, d, show_left_ui=False, show_right_ui=False)
+time.sleep(0.5)
+print("PRUEBA_OK", flush=True)
+import os; os._exit(0)
+"""
+
+
+def _probar_x11(espera=25.0):
+    """Abre un visor de MuJoCo de prueba (~1 s) por X11 en un proceso aparte: True si pudo crear la ventana.
+
+    Si GLX falla, MuJoCo aborta el proceso entero ("could not create window"); en un proceso aparte
+    eso solo da False y el simulador real sigue con la plataforma por defecto."""
+    import subprocess
+    import sys
+    env = dict(os.environ)
+    env.pop("WAYLAND_DISPLAY", None)
+    env.update(XDG_SESSION_TYPE="x11", GDK_BACKEND="x11", SDL_VIDEODRIVER="x11")
+    try:
+        r = subprocess.run([sys.executable, "-c", _PRUEBA], env=env, capture_output=True, text=True, timeout=espera)
+        return "PRUEBA_OK" in r.stdout
+    except Exception:
+        return False
+
+
 def forzar_x11():
     """Obliga a GLFW (visor de MuJoCo) a usar X11/XWayland aunque la sesion sea Wayland.
 
     En Wayland nativo la ventana la dibuja el compositor y no se puede mover/redimensionar desde aqui;
     por XWayland si. Debe llamarse ANTES de abrir el visor. SIM_X11=0 lo desactiva.
-    Devuelve True si hay DISPLAY (XWayland disponible) y se forzo X11."""
+    Antes de forzarlo se comprueba (visor de prueba en otro proceso) que el equipo puede abrir la ventana por X11;
+    si no, se deja la plataforma por defecto. Devuelve True si se forzo X11."""
     if os.environ.get("SIM_X11", "1").strip().lower() in ("0", "off", "no", "false"):
         return False
     if not os.environ.get("DISPLAY"):
         return False  # sin XWayland no hay alternativa: se deja como esta
+    if not _probar_x11():  # en algunos equipos GLX sobre XWayland falla: entonces se usa la plataforma por defecto
+        print("[3colores] XWayland no puede abrir el visor en este equipo (GLX); uso la plataforma por defecto")
+        return False
     os.environ.pop("WAYLAND_DISPLAY", None)      # GLFW 3.3 y 3.4 eligen X11 si no ven Wayland
     os.environ["XDG_SESSION_TYPE"] = "x11"
     os.environ["GDK_BACKEND"] = "x11"
