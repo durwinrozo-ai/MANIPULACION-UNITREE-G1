@@ -9,8 +9,6 @@ Igual que gear_sonic/scripts/run_sim_loop.py, pero:
 Uso (Terminal 1, entorno .venv_teleop, desde la raiz de GR00T-WholeBodyControl):
     python <ruta>/deploy/deploy_sonic/run_sim_3colores.py
     SIM_DEPTH=1 python <ruta>/deploy/deploy_sonic/run_sim_3colores.py   # + profundidad en tcp://*:5567
-    SIM_X11=x11 python ...              # abrir el visor por XWayland (ventana con barra); SIM_X11=egl: con EGL (experimental)
-    SIM_WIN=800x600+100+80 python ...   # tamano/posicion de la ventana (por defecto 1000x700+60+60; SIM_WIN=off no la toca)
 """
 import os
 import pathlib
@@ -18,13 +16,6 @@ import sys
 from typing import Dict
 
 import tyro
-
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ventana_x11 import forzar_x11
-
-# Opcional: abrir el visor por XWayland (X11), donde la ventana tiene barra y se mueve/redimensiona.
-# SIM_X11=x11 (GLX) o SIM_X11=egl; por defecto no se fuerza (en algunos equipos GLX falla). Antes de abrir el visor.
-_X11 = forzar_x11()
 
 import gear_sonic
 from gear_sonic.data.robot_model.instantiation.g1 import instantiate_g1_robot_model
@@ -63,7 +54,6 @@ def main(config: SimLoopConfig):
     wbc_config["ROBOT_SCENE"] = str(scene)  # ruta absoluta: base_sim la respeta
     print(f"[3colores] escena base : {original}")
     print(f"[3colores] escena final: {scene}")
-    print(f"[3colores] ventana: {'XWayland/X11 forzado (' + _X11 + ')' if _X11 != 'off' else 'plataforma por defecto (SIM_X11=x11 o egl para forzar XWayland)'}")
 
     robot_model = instantiate_g1_robot_model()
     sim_wrapper = SimWrapper(
@@ -74,14 +64,6 @@ def main(config: SimLoopConfig):
         offscreen=wbc_config.get("ENABLE_OFFSCREEN", False),
         enable_image_publish=config.enable_image_publish,
     )
-    # Ventana de MuJoCo: normal, mas pequena y movible (por defecto 1000x700). SIM_WIN=WxH+X+Y o off.
-    try:
-        sys.path.insert(0, str(HERE))
-        from ventana_x11 import ajustar_ventana_en_hilo
-        if wbc_config.get("ENABLE_ONSCREEN", True):
-            ajustar_ventana_en_hilo()
-    except Exception as e:  # nunca debe impedir que arranque la simulacion
-        print(f"[3colores] no se pudo ajustar la ventana: {e}")
     if os.environ.get("SIM_DEPTH") == "1":  # profundidad de head_camera (ver sim_depth.py)
         sys.path.insert(0, str(HERE))
         from sim_depth import install_depth_publisher

@@ -47,7 +47,7 @@ DEFAULT_CFG = {
     "vision_port": 8765, "modo": "real",
     "usar_pico": False, "pico_pc_ip": "192.168.123.104", "pico_modo": "ego", "pico_seguro": "habilitar", "pico_env": "tv",
     "pico_puntero": "rayo", "pico_plano": "mundo", "pico_escala": 1.0, "pico_cal_auto": 0, "pico_yaw": 0.0, "pico_pitch": 0.0,
-    "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5567, "sim_ventana": "1000x700+60+60", "sim_x11": "off", "depth_far": 4.0,
+    "cam_server": "teleimager", "depth_port": 55557, "sim_depth": True, "sim_depth_port": 5567, "depth_far": 4.0,
 }
 
 
@@ -272,10 +272,6 @@ def start_proc(name, real=None):
         return P.start(ssh_cmd(remote), ready=r"enviados \d+ bloques", error=r"No such file|Permission denied|error|no hay|No se encontro")
     if name == "sim":
         env = f"SIM_DEPTH=1 SIM_DEPTH_PORT={int(c['sim_depth_port'])} " if c.get("sim_depth") else ""
-        if str(c.get("sim_x11", "off")).strip().lower() in ("x11", "egl"):
-            env += f"SIM_X11={str(c['sim_x11']).strip().lower()} "
-        if re.fullmatch(r"(\d+x\d+(\+-?\d+\+-?\d+)?|off)", str(c.get("sim_ventana", "")).strip().lower()):
-            env += f"SIM_WIN={c['sim_ventana'].strip().lower()} "
         return P.start(venv_prefix() + env + f"python {sh_q(sd)}/run_sim_3colores.py",
                        ready=r"Sensor server running", error=r"Traceback|Segmentation fault|Address already in use|core dumped")
     if name == "deploy":
