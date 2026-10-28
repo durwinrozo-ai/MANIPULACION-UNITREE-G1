@@ -29,7 +29,8 @@ def main():
     p.add_argument("--lista", action="store_true")
     p.add_argument("--tarjeta", help="numero de tarjeta de arecord -l")
     p.add_argument("--dispositivo", default="0")
-    p.add_argument("--nombre", help="parte del nombre de la tarjeta (p. ej. Insta)")
+    p.add_argument("--nombre", help="parte del nombre de la tarjeta (p. ej. Insta). Varios, separados por coma, se "
+                   "prueban en orden (p. ej. Insta,LARK,Hollyland); 'auto' = la primera tarjeta USB de entrada")
     p.add_argument("--destino", default="192.168.123.222", help="IP de la PC en el cable")
     p.add_argument("--puerto", type=int, default=5600)
     a = p.parse_args()
@@ -40,12 +41,20 @@ def main():
     card = a.tarjeta
     if card is None and a.nombre:
         out = arecord_l()
-        for line in out.splitlines():
-            if line.lower().startswith(("tarjeta", "card")) and a.nombre.lower() in line.lower():
-                card = re.search(r"(\d+):", line).group(1)
+        lineas = [l for l in out.splitlines() if l.lower().startswith(("tarjeta", "card"))]
+        for nom in [n.strip() for n in a.nombre.split(",") if n.strip()]:
+            clave = "usb" if nom.lower() == "auto" else nom.lower()
+            for line in lineas:
+                if clave in line.lower():
+                    card = re.search(r"(\d+):", line).group(1)
+                    print(f"[mic] tarjeta elegida ({nom}): {line.strip()}")
+                    break
+            if card is not None:
                 break
         if card is None:
-            print(f"No encuentro una tarjeta con '{a.nombre}'. Usa --lista.")
+            print(f"No encuentro una tarjeta con '{a.nombre}'. Tarjetas de entrada disponibles:")
+            print(out or "(ninguna: el microfono no aparece; revisa el cable USB / receptor)")
+            print("Pon en Ajustes -> Nombre del microfono una parte del nombre de arriba (o 'auto').")
             return 1
     if card is None:
         print("Indica --tarjeta N o --nombre TEXTO (ver --lista).")

@@ -40,7 +40,7 @@ DEFAULT_CFG = {
     "robot_user": "unitree", "robot_pc2": "192.168.123.164", "robot_pc1": "192.168.123.161",
     "pc_ip": "192.168.123.222", "iface": "enp131s0",
     "hsv_file": "~/tres-colores/hsv_real.json",
-    "mic_nombre": "Insta", "udp_puerto": 5600,
+    "mic_nombre": "Insta,LARK,Hollyland", "udp_puerto": 5600,
     "stop_y": 0.93, "walk_speed": 0.3, "max_walk": 0.3, "slow_y": 0.80, "slow_speed": 0.15, "scan_ang_vel": 0.3,
     "voz_activacion": "zuu", "voz_umbral": 300, "voz_idioma": "es-CO",
     "usar_voz": True, "usar_mic": True, "dry_run": False,
