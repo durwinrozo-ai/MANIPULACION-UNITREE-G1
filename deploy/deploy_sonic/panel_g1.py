@@ -230,6 +230,7 @@ class Proc:
 
 
 PHRASES = collections.deque(maxlen=12)
+PICO_CMD = {"cal": False}  # ordenes del panel al visor (se entregan en la respuesta de /api/pico_status)
 PICO = {"visor": False, "gafas": False, "ultimo": "", "t": 0.0}  # estado que publica pico_visor.py
 PORT_PANEL = {"v": 8080}
 PICO_FLAGS = {"probar": False}
@@ -304,6 +305,7 @@ def start_proc(name, real=None):
                f'[ -n "$PY" ] || PY=$(conda run -n {env} which python 2>/dev/null); '
                '[ -n "$PY" ] || { echo "ERROR: no encuentro el entorno conda"; exit 1; }; ')
         PICO.update(visor=False, gafas=False, ultimo="", t=0.0)
+        PICO_CMD["cal"] = False
         a = [f"--panel http://127.0.0.1:{PORT_PANEL['v']}", f"--vision-port {c['vision_port']}",
              f"--modo {c['pico_modo']}", f"--seguro {c['pico_seguro']}", f"--puntero {c['pico_puntero']}",
              f"--plano {c['pico_plano']}", f"--puntero-escala {c['pico_escala']}",
@@ -696,6 +698,11 @@ class H(BaseHTTPRequestHandler):
             return self._json({"ok": vision_key(str(body.get("k", ""))[:1] or "")})
         elif p == "/api/pico_status":
             PICO.update({k: v for k, v in body.items()}, t=time.time())
+            cal, PICO_CMD["cal"] = PICO_CMD["cal"], False
+            return self._json({"ok": True, "cal": cal})
+        elif p == "/api/pico_cmd":
+            if body.get("cmd") == "calibrar":
+                PICO_CMD["cal"] = True
             return self._json({"ok": True})
         elif p == "/api/emergencia":
             vision_key(" ")

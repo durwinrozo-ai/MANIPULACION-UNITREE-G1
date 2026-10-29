@@ -62,6 +62,9 @@ CHIPS = [("A", "ROJO", (60, 60, 230)), ("B", "VERDE", (80, 180, 80)), ("X", "AZU
 # ----------------------------------------------------------------------------
 # Logica de los mandos (pura: se prueba sin gafas)
 # ----------------------------------------------------------------------------
+CAL_PANEL = 4.0  # s de cuenta atras al calibrar desde el panel (tiempo para apuntar a la cruz)
+
+
 class Mapper:
     """Convierte el estado de los mandos en teclas del programa de cajas.
 
@@ -124,12 +127,9 @@ class Mapper:
             elif self.prev.get(k) and k in self.down:  # al soltar: clic corto
                 dur = now - self.down.pop(k)
                 if not self.anulado.get(k) and dur < self.HOLD:
-                    if key == "s" and not ok:
-                        self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
-                    else:
-                        out.append((key, label))
-                        self.avanzando = False
-                        self.activo = False
+                    out.append((key, label))  # Inspeccionar/Quieto solo giran o paran en el sitio: no piden grip
+                    self.avanzando = False
+                    self.activo = False
                 self.anulado[k] = False
         for name, key, label in self.KEYS:
             if up(name):
@@ -140,10 +140,7 @@ class Mapper:
                     self.bloqueo = f"{label}: mantén un grip apretado"
         if up("rTrig"):
             if not self.puntero:  # sin puntero: el gatillo derecho inspecciona
-                if ok:
-                    out.append(("s", "INSPECCIONAR"))
-                else:
-                    self.bloqueo = "INSPECCIONAR: mantén un grip apretado"
+                out.append(("s", "INSPECCIONAR"))
             elif not cal:  # primera vez: el gatillo derecho calibra (apuntando a la cruz del centro)
                 out.append(("CAL", "CALIBRAR puntero (gatillo)"))
             elif punto not in (1, 2, 3):
@@ -464,6 +461,7 @@ class PanelLink:
         self.dry = dry
         self.q = queue.Queue()
         self.ok = None
+        self.cal = False  # el panel pidio calibrar el puntero
         threading.Thread(target=self._run, daemon=True).start()
 
     def _post(self, path, obj):
@@ -476,8 +474,10 @@ class PanelLink:
         while True:
             path, obj = self.q.get()
             try:
-                self._post(path, obj)
+                r = self._post(path, obj)
                 self.ok = True
+                if path == "/api/pico_status" and json.loads(r or b"{}").get("cal"):
+                    self.cal = True
             except Exception:  # noqa: BLE001
                 self.ok = False
 
@@ -553,6 +553,7 @@ def main():
     uv, sel = None, None
     last_stat, last_log, was_conn = 0.0, {}, False
     t_auto = None
+    t_man = None  # cuenta atras de «Calibrar puntero» pedida desde el panel
     dt = 1.0 / args.fps
     try:
         while True:
@@ -595,6 +596,25 @@ def main():
                     t_auto = None
             elif not conn:
                 t_auto = None
+            if link.cal:  # boton «Calibrar puntero» del panel: cuenta atras para apuntar a la cruz
+                link.cal = False
+                if isinstance(ptr, Puntero) and conn:
+                    t_man = t0
+                else:
+                    ultimo, t_ultimo = "calibrar: sin gafas conectadas" if isinstance(ptr, Puntero) else "calibrar: el cursor con joystick no lo necesita", t0
+            if t_man is not None:
+                falta = CAL_PANEL - (t0 - t_man)
+                if not (isinstance(ptr, Puntero) and conn):
+                    t_man = None
+                elif falta > 0:
+                    auto_txt = f"calibrando en {int(falta) + 1} s: apunta a la cruz del centro"
+                else:
+                    t_man = None
+                    if H is not None and ptr.calibrar(H, M):
+                        ultimo, t_ultimo = "puntero calibrado (boton del panel)", t0
+                    else:
+                        ultimo, t_ultimo = "calibrar: sin pose del mando", t0
+                    print(f"[Pico] {ultimo}")
             cal = ptr is None or ptr.calibrado
             acts = mp.update(s, t0, punto=sel[0] if sel else None, cal=cal) if conn else []
             for k, label in acts:

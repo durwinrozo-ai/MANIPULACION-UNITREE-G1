@@ -195,17 +195,18 @@ Las gafas muestran lo mismo que el panel (el video del programa de cajas, o la c
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (al soltar: PARAR) |
 | **Gatillo derecho** | Elegir la caja a la que apuntas |
-| Clic corto joystick derecho / izquierdo | Inspeccionar / Quieto |
+| Clic corto joystick derecho / izquierdo | Inspeccionar / Quieto (no piden grip: solo giran o paran en el sitio) |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
 | Grip (lateral) | Seguro |
 
 **Calibrar el puntero** (cada vez que entras a las gafas). Apunta a la cruz amarilla del centro y usa **cualquiera** de estas formas:
 
-1. **Gatillo derecho** mientras el estado dice «puntero SIN CALIBRAR».
-2. **Mantener un clic de joystick 1 s**.
-3. **Los dos clics a la vez**.
-4. Automática: «Pico: calibrar el puntero solo a los N s de conectar» en Ajustes (`--cal-auto N`; 0 = desactivado).
-5. Sin calibración: Puntero = **cursor con joystick izq.** (selector de la tarjeta Pico) (lo mueves con el joystick y eliges con el gatillo derecho).
+1. **Botón «🎯 Calibrar puntero»** de la tarjeta Pico del panel: cuenta atrás de 4 s en las gafas; apunta a la cruz del centro y se calibra solo (pide las gafas conectadas y el puntero por rayo).
+2. **Gatillo derecho** mientras el estado dice «puntero SIN CALIBRAR».
+3. **Mantener un clic de joystick 1 s**.
+4. **Los dos clics a la vez**.
+5. Automática: «Pico: calibrar el puntero solo a los N s de conectar» en Ajustes (`--cal-auto N`; 0 = desactivado).
+6. Sin calibración: Puntero = **cursor con joystick izq.** (selector de la tarjeta Pico) (lo mueves con el joystick y eliges con el gatillo derecho).
 
 Un clic corto de joystick actúa al soltarse; si lo mantienes para calibrar no dispara Inspeccionar ni Quieto.
 
@@ -218,7 +219,8 @@ Un clic corto de joystick actúa al soltarse; si lo mantienes para calibrar no d
 | `CondaError: Run 'conda init'` al iniciar el visor | Resuelto: el panel usa el python del entorno `tv` directamente. `git pull` y reiniciar el panel |
 | `no encuentro 'televuer'` | Cambia el entorno en Ajustes («Pico: entorno conda») |
 | Puerto 8012 en uso | Otra copia del visor: ciérrala |
-| «Mantén un grip apretado» | Aprieta un grip al dar la orden |
+| «Mantén un grip apretado» | Rojo, Verde, Azul, Avanzar y el puntero piden un grip apretado (de cualquier mano). Inspeccionar y Quieto no |
+| Inspeccionar (clic del joystick derecho) no hace nada | Debe ser un clic corto (<1 s; uno largo calibra). Usa «Probar mandos» del panel: debe listar `rStick` al hacer clic. Si no aparece, el Pico no reporta ese clic |
 | El gatillo dice «Apunta a una caja» o «Calibra el puntero» | Calibra y apunta dentro del recuadro de una caja; el programa de cajas debe estar encendido |
 | El cursor se desvía | Ajusta «Plano del video», el tamaño o el yaw/pitch en Ajustes, o usa el puntero con joystick |
 | «Sin imagen del robot» | Inicia el programa de cajas o una cámara en el panel |

@@ -101,6 +101,7 @@ button.on{background:var(--acc);border-color:var(--acc);color:#fff}
       <button class="pri" onclick="proc('pico','start')" id="pk_on">🥽 Iniciar visor</button>
       <button onclick="proc('pico','stop')" id="pk_off">Detener visor</button>
       <button onclick="post('/api/proc',{name:'pico',action:'start',kind:'probar'})" title="muestra qué botones detecta y no manda nada al robot">🧪 Probar mandos</button>
+      <button id="pk_cal" onclick="post('/api/pico_cmd',{cmd:'calibrar'})" title="cuenta atrás de 4 s en las gafas: apunta con el mando derecho a la cruz del centro del video">🎯 Calibrar puntero</button>
     </div>
     <div class="row" style="margin-top:8px" id="pk_pills"></div>
     <div class="row" style="margin-top:8px">
@@ -227,7 +228,7 @@ function render(){
 
  // lentes Pico 4
  {const k=S.pico||{},pp=P.pico;
-  $('pk_on').disabled=pp.alive;$('pk_off').disabled=!pp.alive;
+  $('pk_on').disabled=pp.alive;$('pk_off').disabled=!pp.alive;$('pk_cal').disabled=!(pp.alive&&k.gafas&&S.cfg.pico_puntero==='rayo');
   if(document.activeElement!==$('pk_modo'))$('pk_modo').value=S.cfg.pico_modo;
   if(document.activeElement!==$('pk_seg'))$('pk_seg').value=S.cfg.pico_seguro;
   if(document.activeElement!==$('pk_ptr'))$('pk_ptr').value=S.cfg.pico_puntero;if(document.activeElement!==$('pk_plano'))$('pk_plano').value=S.cfg.pico_plano;

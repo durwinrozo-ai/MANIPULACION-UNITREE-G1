@@ -113,10 +113,11 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (repite `w`; al soltar: PARAR) |
 | **Gatillo derecho** | **Elegir la caja a la que apuntas con el puntero** |
-| Clic corto del joystick derecho | Inspeccionar |
-| Clic corto del joystick izquierdo | Quieto |
+| Clic corto del joystick derecho | Inspeccionar (no pide grip: solo gira en el sitio) |
+| Clic corto del joystick izquierdo | Quieto (no pide grip) |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
 | Gatillo derecho (puntero sin calibrar) | Calibrar el puntero apuntando a la cruz del centro |
+| Botón **🎯 Calibrar puntero** del panel | Cuenta atrás de 4 s en las gafas: apunta a la cruz del centro y se calibra solo |
 | Los dos clics a la vez, o mantener un clic 1 s | Calibrar de nuevo el puntero |
 | Grip (lateral) | Seguro |
 
