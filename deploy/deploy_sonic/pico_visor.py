@@ -71,7 +71,8 @@ class Mapper:
     s: dict con rA, rB, lX, lY, rTrig, lTrig, rStick, lStick, gripL, gripR (bool).
     punto: caja bajo el puntero (1/2/3) o None; cal: el puntero esta calibrado (o no hace falta).
     update() devuelve una lista de (tecla, etiqueta). Actua por flanco de subida.
-    La tecla especial "CAL" pide calibrar el puntero (no se envia al panel).
+    La tecla especial "CAL" pide calibrar el puntero (no se envia al panel); "PT" = ir al punto del video al que
+    se apunta (el programa lo calcula con xy, que es ese punto normalizado 0..1 o None si no apunta al video).
     """
     KEYS = (("rA", "1", "ROJO"), ("rB", "2", "VERDE"), ("lX", "3", "AZUL"))
     NOMBRES = {1: "ROJO", 2: "VERDE", 3: "AZUL"}
@@ -92,7 +93,7 @@ class Mapper:
     def seguro_ok(self, s):
         return self.seguro == "off" or bool(s.get("gripL") or s.get("gripR"))
 
-    def update(self, s, now, punto=None, cal=True):
+    def update(self, s, now, punto=None, cal=True, xy=None):
         out = []
         self.bloqueo = ""
 
@@ -143,8 +144,14 @@ class Mapper:
                 out.append(("s", "INSPECCIONAR"))
             elif not cal:  # primera vez: el gatillo derecho calibra (apuntando a la cruz del centro)
                 out.append(("CAL", "CALIBRAR puntero (gatillo)"))
-            elif punto not in (1, 2, 3):
-                self.bloqueo = "Apunta a una caja y aprieta el gatillo"
+            elif punto not in (1, 2, 3):  # no hay caja bajo el cursor: ir al punto del piso al que apuntas
+                if xy is None:
+                    self.bloqueo = "Apunta al video y aprieta el gatillo"
+                elif ok:
+                    out.append(("PT", "IR AL PUNTO"))
+                    self.activo = True
+                else:
+                    self.bloqueo = "IR AL PUNTO: mantén un grip apretado"
             elif ok:
                 out.append((str(punto), f"{self.NOMBRES[punto]} (puntero)"))
                 self.activo = True
@@ -485,6 +492,10 @@ class PanelLink:
         if not self.dry:
             self.q.put(("/api/key", {"k": k, "origen": "pico"}))
 
+    def punto(self, x, y):
+        if not self.dry:
+            self.q.put(("/api/punto", {"x": round(float(x), 4), "y": round(float(y), 4), "origen": "pico"}))
+
     def status(self, obj):
         if self.q.qsize() < 20:
             self.q.put(("/api/pico_status", obj))
@@ -616,8 +627,19 @@ def main():
                         ultimo, t_ultimo = "calibrar: sin pose del mando", t0
                     print(f"[Pico] {ultimo}")
             cal = ptr is None or ptr.calibrado
-            acts = mp.update(s, t0, punto=sel[0] if sel else None, cal=cal) if conn else []
+            xy = None  # punto del video (normalizado 0..1) al que apunta el cursor
+            if uv is not None and src_hw is not None:
+                bx, by, bw, bh = letterbox_rect(src_hw[0], src_hw[1], args.alto, args.ancho)
+                nx, ny = (uv[0] - bx) / bw, (uv[1] - by) / bh
+                if 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0:
+                    xy = (nx, ny)
+            acts = mp.update(s, t0, punto=sel[0] if sel else None, cal=cal, xy=xy) if conn else []
             for k, label in acts:
+                if k == "PT":
+                    link.punto(*xy)
+                    ultimo, t_ultimo = f"IR AL PUNTO ({xy[0]:.2f}, {xy[1]:.2f})", t0
+                    print(f"[Pico] {ultimo}{' (prueba: no enviado)' if args.probar else ''}")
+                    continue
                 if k == "CAL":
                     if isinstance(ptr, Puntero) and H is not None and ptr.calibrar(H, M):
                         label = "puntero calibrado"

@@ -194,7 +194,7 @@ Las gafas muestran lo mismo que el panel (el video del programa de cajas, o la c
 | **B** (derecho) | Verde |
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (al soltar: PARAR) |
-| **Gatillo derecho** | Elegir la caja a la que apuntas |
+| **Gatillo derecho** | Elegir la caja a la que apuntas; si apuntas al piso sin caja, **ir a ese punto** |
 | Clic corto joystick derecho / izquierdo | Inspeccionar / Quieto (no piden grip: solo giran o paran en el sitio) |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
 | Grip (lateral) | Seguro |
@@ -209,6 +209,8 @@ Las gafas muestran lo mismo que el panel (el video del programa de cajas, o la c
 6. Sin calibración: Puntero = **cursor con joystick izq.** (selector de la tarjeta Pico) (lo mueves con el joystick y eliges con el gatillo derecho).
 
 Un clic corto de joystick actúa al soltarse; si lo mantienes para calibrar no dispara Inspeccionar ni Quieto.
+
+**Ir a un punto del piso.** Apunta a cualquier zona del piso en el video (sin caja bajo el cursor) y aprieta el gatillo derecho: el programa sigue ese punto en la imagen (flujo óptico) y el robot camina hacia él, con la misma velocidad y la misma parada que con las cajas (`y_max = 0.93`). En el video sale una cruz amarilla «PUNTO». Se detiene solo si pierde el punto (piso sin textura o fuera del cuadro), a los 30 s (`--point-timeout`) o con PARAR. El punto debe estar en el piso, y el robot **no ve obstáculos** en el camino. Pide el mismo seguro (grip).
 
 **Seguro** (se elige en el panel): *habilitar* (por defecto) exige un grip apretado al dar la orden; *mantener* además manda PARAR si sueltas los dos grips; *sin grip* no se recomienda con el robot real. La parada de emergencia sigue siendo el mando Unitree o `O`.
 

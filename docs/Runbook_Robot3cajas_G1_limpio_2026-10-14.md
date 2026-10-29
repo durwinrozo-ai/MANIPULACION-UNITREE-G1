@@ -112,7 +112,7 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 | **B** (derecho) | Verde |
 | **X** (izquierdo) | Azul |
 | **Y** (izquierdo), mantener | Avanzar recto (repite `w`; al soltar: PARAR) |
-| **Gatillo derecho** | **Elegir la caja a la que apuntas con el puntero** |
+| **Gatillo derecho** | **Elegir la caja a la que apuntas con el puntero**; si apuntas a una zona del piso **sin caja**, el robot **camina hasta ese punto** |
 | Clic corto del joystick derecho | Inspeccionar (no pide grip: solo gira en el sitio) |
 | Clic corto del joystick izquierdo | Quieto (no pide grip) |
 | Gatillo izquierdo | **PARAR** (siempre funciona) |
@@ -126,6 +126,8 @@ Las gafas muestran **lo mismo que el panel** (el video del programa de cajas con
 1. **Calibrar (cada vez que entras a las gafas):** apunta a la cruz amarilla del centro del video y aprieta los dos joysticks a la vez. El cursor aparece y el estado dice «puntero calibrado».
 2. Apunta a una caja: se resalta. Aprieta el gatillo derecho: el robot va hacia ella y se detiene en `y_max = 0.93`.
 3. Si el cursor no cae donde apuntas: «Plano del video» (fijo en el espacio / pegado a las gafas), «Pico: tamaño del plano del video» y el ajuste fino yaw/pitch están en Ajustes. Alternativa que no depende de la pose del mando: Puntero = **cursor con joystick izquierdo** (lo mueves con el joystick y eliges con el gatillo derecho).
+
+**Ir a un punto del piso.** Apunta con el mando derecho a cualquier zona del piso en el video (sin caja bajo el cursor) y aprieta el gatillo derecho: el programa de cajas sigue ese punto en la imagen y el robot camina hacia él con la misma velocidad y parada que con las cajas (se detiene cuando el punto llega a `y_max = 0.93`). En el video aparece una cruz amarilla «PUNTO». Se detiene solo si pierde el punto (piso sin textura, sale del cuadro), a los 30 s (`--point-timeout`) o con PARAR. El punto debe estar **en el piso**; no ve obstáculos en el camino. Pide el mismo seguro (grip).
 
 **Seguro (se elige en el panel):** *habilitar* (por defecto): para dar un destino hay que tener un grip apretado en ese momento; *mantener*: además, si sueltas los dos grips el robot recibe PARAR; *sin grip*: no recomendado con el robot real. La barra inferior de las gafas muestra la leyenda de los botones, el estado del seguro y la última orden. La parada de emergencia real sigue siendo el mando Unitree o la tecla `O`.
 

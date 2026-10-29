@@ -20,6 +20,7 @@ Teclas (con foco en la ventana "Lo que ve el robot"; no distingue mayusculas):
     ESPACIO o x  PARAR (IDLE inmediato)        q  salir (deja al robot quieto)
     w  prueba de marcha: camina recto 3 s sin usar la vision (aisla el problema)
     Voz (--voz g1|pc): "zuu, busca el rojo/verde/azul", "zuu, inspecciona", "zuu, quieto"; "para"/"alto" = PARAR
+    Punto: desde los lentes Pico (gatillo derecho sobre el piso) o POST /punto?x=&y= del panel: camina a ese punto del video
     b  reenviar el comando `start` (en --real: pulsar dos veces en 3 s)
 
 Robot real: la parada de emergencia de verdad es la tecla O en la terminal del deploy
@@ -53,8 +54,8 @@ HEADER_SIZE = 1280  # debe coincidir con ZMQPackedMessageSubscriber::HEADER_SIZE
 MODE_IDLE = 0
 MODE_SLOW_WALK = 1  # 0.1 - 0.8 m/s
 
-TARGET_STOP, TARGET_SCAN, TARGET_RED, TARGET_GREEN, TARGET_BLUE = -1, 0, 1, 2, 3
-TARGET_NAMES = {-1: "QUIETO", 0: "INSPECCIONANDO", 1: "ROJO", 2: "VERDE", 3: "AZUL"}
+TARGET_STOP, TARGET_SCAN, TARGET_RED, TARGET_GREEN, TARGET_BLUE, TARGET_POINT = -1, 0, 1, 2, 3, 4
+TARGET_NAMES = {-1: "QUIETO", 0: "INSPECCIONANDO", 1: "ROJO", 2: "VERDE", 3: "AZUL", 4: "PUNTO"}
 
 REAL_MAX_WALK = 0.3  # m/s, tope en --real mientras no se valide el robot
 
@@ -381,7 +382,120 @@ class Navigator:
 
 
 # ----------------------------------------------------------------------------
-def draw_overlay(img_rgb, nav, det, label, hz, mask=None, real=False):
+class PointTracker:
+    """Sigue en la imagen un punto del piso elegido por el operador (p. ej. con el puntero de los lentes Pico).
+
+    Se siguen unas decenas de esquinas alrededor del punto con flujo optico de Lucas-Kanade (con comprobacion
+    adelante-atras) y el punto se mueve con la transformacion de semejanza (traslacion + giro + escala) que
+    mejor explica el movimiento de esas esquinas (RANSAC). Asi el punto "se queda pegado al piso" aunque el
+    robot avance (la escala crece al acercarse). Si se pierde el seguimiento, `lost` pasa a True y el robot se
+    detiene. Entrega la misma tupla que detect_color: (detectado, error_x, y_min, y_max) con y = fila del punto.
+    """
+    RADIO = 0.12          # radio de la zona de esquinas, como fraccion del ancho de la imagen
+    MAX_FALLOS = 8        # cuadros seguidos sin seguimiento valido antes de rendirse
+    RESEMBRAR = 12        # cada tantos cuadros se renuevan las esquinas alrededor del punto
+
+    def __init__(self):
+        self.active = False
+        self.lost = False
+        self.reset()
+
+    def reset(self):
+        self.prev = None
+        self.pts = None
+        self.xy = None
+        self.n = 0
+        self.fallos = 0
+        self.size = None
+
+    def stop(self):
+        self.active = False
+        self.lost = False
+        self.reset()
+
+    def start(self, frame_rgb, nx, ny):
+        self.reset()
+        h, w = frame_rgb.shape[:2]
+        self.size = (w, h)
+        self.xy = np.array([float(np.clip(nx, 0, 1)) * w, float(np.clip(ny, 0, 1)) * h], np.float32)
+        self.prev = cv2.cvtColor(np.ascontiguousarray(frame_rgb), cv2.COLOR_RGB2GRAY)
+        self.pts = self._esquinas(self.prev)
+        self.active, self.lost = True, False
+        return True
+
+    def _esquinas(self, gray):
+        w, h = self.size
+        r = int(self.RADIO * w)
+        mask = np.zeros(gray.shape, np.uint8)
+        cv2.circle(mask, (int(self.xy[0]), int(self.xy[1])), r, 255, -1)
+        c = cv2.goodFeaturesToTrack(gray, maxCorners=60, qualityLevel=0.005, minDistance=4, mask=mask)
+        if c is None or len(c) < 8:  # piso sin textura: rejilla regular (LK sigue lo que pueda)
+            gx, gy = np.meshgrid(np.linspace(-r, r, 7), np.linspace(-r, r, 7))
+            g = np.stack([gx.ravel() + self.xy[0], gy.ravel() + self.xy[1]], 1).astype(np.float32)
+            g = g[(g[:, 0] >= 0) & (g[:, 0] < w) & (g[:, 1] >= 0) & (g[:, 1] < h)]
+            c = g.reshape(-1, 1, 2)
+        return c.astype(np.float32)
+
+    def update(self, frame_rgb):
+        """Procesa un cuadro NUEVO. Devuelve True si el punto sigue valido."""
+        if not self.active or self.lost:
+            return False
+        gray = cv2.cvtColor(np.ascontiguousarray(frame_rgb), cv2.COLOR_RGB2GRAY)
+        if gray.shape != self.prev.shape:
+            self.lost = True
+            return False
+        ok = False
+        if self.pts is not None and len(self.pts) >= 4:
+            lk = dict(winSize=(21, 21), maxLevel=3, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03))
+            p1, st, _ = cv2.calcOpticalFlowPyrLK(self.prev, gray, self.pts, None, **lk)
+            p0, st2, _ = cv2.calcOpticalFlowPyrLK(gray, self.prev, p1, None, **lk)
+            fb = np.linalg.norm((self.pts - p0).reshape(-1, 2), axis=1)
+            good = (st.ravel() == 1) & (st2.ravel() == 1) & (fb < 1.5)
+            if int(good.sum()) >= 4:
+                a, b = self.pts[good], p1[good]
+                M, inl = cv2.estimateAffinePartial2D(a, b, method=cv2.RANSAC, ransacReprojThreshold=3.0)
+                if M is not None and inl is not None and int(inl.sum()) >= 4:
+                    sc = float(np.hypot(M[0, 0], M[1, 0]))
+                    nuevo = M @ np.array([self.xy[0], self.xy[1], 1.0])
+                    salto = float(np.linalg.norm(nuevo - self.xy))
+                    if 0.7 < sc < 1.5 and salto < 0.25 * self.size[0]:
+                        self.xy = nuevo.astype(np.float32)
+                        self.pts = b[inl.ravel() == 1].reshape(-1, 1, 2)
+                        ok = True
+        self.prev = gray
+        self.n += 1
+        if ok:
+            self.fallos = 0
+            w, h = self.size
+            if not (0 <= self.xy[0] < w and 0 <= self.xy[1] < h + 40):  # se fue del cuadro por un lado
+                self.lost = True
+                return False
+            if self.n % self.RESEMBRAR == 0 or len(self.pts) < 12:
+                self.pts = self._esquinas(gray)
+            return True
+        self.fallos += 1
+        if self.fallos >= self.MAX_FALLOS:
+            self.lost = True
+        elif self.pts is None or len(self.pts) < 4:
+            self.pts = self._esquinas(gray)
+        return False
+
+    def det(self):
+        """(detectado, err, y_min, y_max) como detect_color; None si no hay punto."""
+        if not self.active or self.lost or self.xy is None:
+            return None
+        w, h = self.size
+        y = float(min(self.xy[1] / h, 1.0))
+        return (True, float((self.xy[0] - w / 2.0) / (w / 2.0)), y, y)
+
+    def norm(self):
+        if not self.active or self.xy is None:
+            return None
+        return (float(self.xy[0] / self.size[0]), float(self.xy[1] / self.size[1]))
+
+
+# ----------------------------------------------------------------------------
+def draw_overlay(img_rgb, nav, det, label, hz, mask=None, real=False, punto=None):
     out = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     out = cv2.resize(out, (640, 480), interpolation=cv2.INTER_NEAREST)
     if mask is not None and mask.any():
@@ -396,16 +510,23 @@ def draw_overlay(img_rgb, nav, det, label, hz, mask=None, real=False):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
         yline = int(det[3] * 480)
         cv2.line(out, (0, yline), (640, yline), (0, 255, 255), 1)
+    if punto is not None:  # destino elegido sobre el piso: cruz + circulo
+        px, py = int(punto[0] * 640), int(punto[1] * 480)
+        cv2.circle(out, (px, py), 14, (0, 255, 255), 2)
+        cv2.line(out, (px - 20, py), (px + 20, py), (0, 255, 255), 2)
+        cv2.line(out, (px, py - 20), (px, py + 20), (0, 255, 255), 2)
+        cv2.putText(out, "PUNTO", (px + 16, py - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
     return out
 
 
 class PanelBridge:
     """Servidor HTTP local (solo 127.0.0.1) para el panel web panel_g1.py:
-    GET /video.mjpg (lo que ve el robot), GET /status, POST /key?k=, POST /voz?on=0|1."""
+    GET /video.mjpg (lo que ve el robot), GET /status, POST /key?k=, POST /punto?x=&y= (destino sobre el piso), POST /voz?on=0|1."""
 
     def __init__(self, port):
         self.port = port
         self.keys = queue.Queue()
+        self.points = queue.Queue()  # destinos (x, y) normalizados 0..1 elegidos sobre el video
         self.voz_enabled = True
         self.status = {}
         self._jpg = None
@@ -475,6 +596,15 @@ class PanelBridge:
                         bridge.keys.put(k.lower())
                         return self._json({"ok": True, "k": k})
                     return self._json({"ok": False}, 400)
+                if u.path == "/punto":
+                    try:
+                        x, y = float(q.get("x", [""])[0]), float(q.get("y", [""])[0])
+                    except ValueError:
+                        return self._json({"ok": False}, 400)
+                    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                        return self._json({"ok": False, "error": "fuera del video"}, 400)
+                    bridge.points.put((x, y))
+                    return self._json({"ok": True, "x": x, "y": y})
                 if u.path == "/voz":
                     bridge.voz_enabled = q.get("on", ["1"])[0] == "1"
                     return self._json({"ok": True, "voz_enabled": bridge.voz_enabled})
@@ -585,6 +715,8 @@ def main():
     p.add_argument("--stop-y", type=float, default=None,
                    help="y_max de llegada; 0.93 = ~0.85 m en el simulador. EN REAL hay que calibrarlo")
     p.add_argument("--arrive-ticks", type=int, default=5)
+    p.add_argument("--point-timeout", type=float, default=30.0,
+                   help="s maximos caminando hacia un punto elegido en el video antes de parar (0 = sin limite)")
     p.add_argument("--alpha-err", type=float, default=0.2, help="suavizado del error (mas alto = menos retardo)")
     p.add_argument("--k-turn", type=float, default=0.6)
     p.add_argument("--max-turn", type=float, default=0.6, help="rad/s")
@@ -697,6 +829,8 @@ def main():
     prev_label = ""
     walk_until = 0.0  # tecla w: prueba de marcha recta sin vision
     cajas, tick = {}, 0  # cajas detectadas (para el puntero de los lentes Pico)
+    tracker = PointTracker()  # destino sobre el piso elegido en el video (TARGET_POINT)
+    point_t0, last_ft = 0.0, -1.0
     if args.dry_run:
         print("[DRY-RUN] el planner siempre recibe IDLE: el robot NO se mueve; se ve la logica en pantalla.")
 
@@ -707,8 +841,33 @@ def main():
             det, mask = None, None
             if frame is not None and nav.target in RGB_RULES:
                 det, mask = detect_color(frame, nav.target, args.color_mode, hsv_rules, args.min_pixels)
+            if bridge is not None and not bridge.points.empty():  # destino elegido sobre el video
+                try:
+                    while True:
+                        px, py = bridge.points.get_nowait()
+                except queue.Empty:
+                    pass
+                if frame is not None and t0 - ft < 1.0 and tracker.start(frame, px, py):
+                    nav.set_target(TARGET_POINT, force=True)
+                    point_t0, last_ft = t0, ft
+                    print(f"[Punto] destino en el video ({px:.2f}, {py:.2f}): camino hacia el (ESPACIO para parar)")
+                else:
+                    print("[Punto] sin imagen: no se acepta el destino")
+            if nav.target == TARGET_POINT:
+                if frame is not None and ft != last_ft:  # cuadro nuevo: seguir el punto
+                    last_ft = ft
+                    tracker.update(frame)
+                det = tracker.det()
+                if tracker.lost and not nav.arrived:
+                    print("[Punto] perdi el punto (seguimiento): quieto")
+                    tracker.stop(); nav.set_target(TARGET_STOP); det = None
+                elif args.point_timeout > 0 and not nav.arrived and t0 - point_t0 > args.point_timeout:
+                    print(f"[Punto] tiempo maximo ({args.point_timeout:.0f} s) sin llegar: quieto")
+                    tracker.stop(); nav.set_target(TARGET_STOP); det = None
+            elif tracker.active:
+                tracker.stop()
             if frame is None or t0 - ft > 1.0:
-                if nav.target in RGB_RULES or nav.target == TARGET_SCAN:
+                if nav.target in RGB_RULES or nav.target in (TARGET_SCAN, TARGET_POINT):
                     # sin imagen no se camina: quieto por seguridad
                     if not warned_noimg:
                         print("[Vision] sin imagen: robot quieto "
@@ -745,7 +904,7 @@ def main():
             elif frame is None:
                 cajas = {}
             if frame is not None:
-                view = draw_overlay(frame, nav, det, label, hz, mask, real)
+                view = draw_overlay(frame, nav, det, label, hz, mask, real, punto=tracker.norm() if nav.target == TARGET_POINT else None)
                 if bridge is not None:
                     for tk, (bx0, by0, bx1, by1) in cajas.items():
                         col = {"1": (60, 60, 255), "2": (60, 200, 60), "3": (255, 120, 40)}[tk]
@@ -787,6 +946,8 @@ def main():
                     "stop_y": args.stop_y, "walk_speed": args.walk_speed, "real": bool(real),
                     "dry_run": bool(args.dry_run), "walking_test": bool(t0 < walk_until),
                     "cajas": cajas,
+                    "punto": (lambda n: None if n is None else {"x": round(n[0], 3), "y": round(n[1], 3)})(
+                        tracker.norm() if nav.target == TARGET_POINT else None),
                     "voz": args.voz, "voz_enabled": bridge.voz_enabled,
                     "voz_activa": voz is not None, "frame_age": None if frame is None else round(t0 - ft, 2),
                     "t": round(t0, 2)}

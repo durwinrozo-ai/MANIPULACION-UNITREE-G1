@@ -583,6 +583,15 @@ def vision_key(k):
         return False
 
 
+def vision_punto(x, y):
+    try:
+        req = urllib.request.Request(vision_url(f"/punto?x={float(x):.4f}&y={float(y):.4f}"), method="POST")
+        with urllib.request.urlopen(req, timeout=0.6):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def vision_voz(on):
     try:
         req = urllib.request.Request(vision_url(f"/voz?on={1 if on else 0}"), method="POST")
@@ -696,6 +705,12 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"ok": PROCS[name].send(str(body.get("text", "")), body.get("newline", True))})
         elif p == "/api/key":
             return self._json({"ok": vision_key(str(body.get("k", ""))[:1] or "")})
+        elif p == "/api/punto":
+            try:
+                ok = vision_punto(body.get("x"), body.get("y"))
+            except (TypeError, ValueError):
+                ok = False
+            return self._json({"ok": ok})
         elif p == "/api/pico_status":
             PICO.update({k: v for k, v in body.items()}, t=time.time())
             cal, PICO_CMD["cal"] = PICO_CMD["cal"], False
